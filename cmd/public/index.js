@@ -10,8 +10,8 @@ const socket = new WebSocket('ws://localhost:3000/ws');
 socket.onopen = () => {
   const initData = {
     "window_size": {
-      "width": elm.clientWidth,
-      "height": elm.clientHeight
+      "width": terminal.cols,
+      "height": terminal.rows,
     },
     "cmd": "zsh"
   };
@@ -26,7 +26,6 @@ socket.onopen = () => {
   }
 
   socket.onmessage = (e) => {
-    console.log(e);
     terminal.write(e.data);
   }
 }

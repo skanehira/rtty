@@ -20,8 +20,8 @@ var static embed.FS
 
 type InitData struct {
 	WindowSize struct {
-		Width  int `json:"width"`
-		Height int `json:"height"`
+		Width  uint16 `json:"width"`
+		Height uint16 `json:"height"`
 	} `json:"window_size"`
 	Cmd string `json:"cmd"`
 }
@@ -29,14 +29,14 @@ type InitData struct {
 func shell(ws *websocket.Conn) {
 	defer ws.Close()
 
-	data := map[string]interface{}{}
+	var data InitData
 	if err := json.NewDecoder(ws).Decode(&data); err != nil {
 		ws.Write([]byte(fmt.Sprintf("failed to decode json: %s\r\n", err)))
 		return
 	}
 
 	// Create arbitrary command.
-	c := exec.Command("zsh")
+	c := exec.Command(data.Cmd)
 
 	// Start the command with a pty.
 	ptmx, err := pty.Start(c)
@@ -51,7 +51,7 @@ func shell(ws *websocket.Conn) {
 		_, _ = c.Process.Wait()
 	}() // Best effort.
 
-	pty.Setsize(ptmx, &pty.Winsize{Rows: 100, Cols: 100, X: 0, Y: 0})
+	pty.Setsize(ptmx, &pty.Winsize{Rows: data.WindowSize.Height, Cols: data.WindowSize.Width, X: 0, Y: 0})
 
 	// Copy stdin to the pty and the pty to stdout.
 	// NOTE: The goroutine will keep reading until the next keystroke before returning.
