@@ -1,4 +1,4 @@
-project_name: go-cli-template
+project_name: rtty
 env:
   - GO111MODULE=on
 before:
@@ -19,8 +19,8 @@ builds:
   - main: .
     ldflags:
       - -s -w
-      - -X github.com/skanehira/go-cli-template/cmd.Version={{.Version}}
-      - -X github.com/skanehira/go-cli-template/cmd.Revision={{.ShortCommit}}
+      - -X github.com/skanehira/rtty/cmd.Version={{.Version}}
+      - -X github.com/skanehira/rtty/cmd.Revision={{.ShortCommit}}
     goos:
       - linux
       - windows
