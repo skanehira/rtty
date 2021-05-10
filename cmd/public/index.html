@@ -6,6 +6,38 @@
   </head>
   <body>
     <div id="terminal" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%;"></div>
-    <script src="index.js"></script>
+    <script>
+      const terminal = new Terminal({ cursorBlink: true });
+      const fitAddon = new FitAddon.FitAddon();
+      terminal.loadAddon(fitAddon);
+      terminal.open(document.getElementById('terminal'))
+      fitAddon.fit();
+
+      const elm = document.querySelector(".terminal")
+
+      const socket = new WebSocket('ws://localhost:{port}/ws');
+      socket.onopen = () => {
+        const initData = {
+          "window_size": {
+            "width": terminal.cols,
+            "height": terminal.rows,
+          },
+          "cmd": "zsh"
+        };
+
+        socket.send(JSON.stringify(initData));
+        terminal.onKey((e) => {
+          socket.send(e.key);
+        });
+
+        socket.onclose = () => {
+          terminal.write('\r\n[Disconnected]\r\n')
+        }
+
+        socket.onmessage = (e) => {
+          terminal.write(e.data);
+        }
+      }
+    </script>
   </body>
 </html>

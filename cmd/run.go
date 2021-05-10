@@ -1,22 +1,23 @@
 package cmd
 
 import (
-	"embed"
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/fs"
 	"log"
 	"net/http"
 	"os/exec"
+	"strings"
+
+	_ "embed"
 
 	"github.com/creack/pty"
 	"github.com/spf13/cobra"
 	"golang.org/x/net/websocket"
 )
 
-//go:embed public/*
-var static embed.FS
+//go:embed public/index.html
+var indexHTML string
 
 type InitData struct {
 	WindowSize struct {
@@ -26,12 +27,12 @@ type InitData struct {
 	Cmd string `json:"cmd"`
 }
 
-func shell(ws *websocket.Conn) {
+func run(ws *websocket.Conn) {
 	defer ws.Close()
 
 	var data InitData
 	if err := json.NewDecoder(ws).Decode(&data); err != nil {
-		ws.Write([]byte(fmt.Sprintf("failed to decode json: %s\r\n", err)))
+		_, _ = ws.Write([]byte(fmt.Sprintf("failed to decode json: %s\r\n", err)))
 		return
 	}
 
@@ -41,9 +42,10 @@ func shell(ws *websocket.Conn) {
 	// Start the command with a pty.
 	ptmx, err := pty.Start(c)
 	if err != nil {
-		ws.Write([]byte(fmt.Sprintf("failed to creating pty: %s\r\n", err)))
+		_, _ = ws.Write([]byte(fmt.Sprintf("failed to creating pty: %s\r\n", err)))
 		return
 	}
+
 	// Make sure to close the pty at the end.
 	defer func() {
 		_ = ptmx.Close()
@@ -51,31 +53,44 @@ func shell(ws *websocket.Conn) {
 		_, _ = c.Process.Wait()
 	}() // Best effort.
 
-	pty.Setsize(ptmx, &pty.Winsize{Rows: data.WindowSize.Height, Cols: data.WindowSize.Width, X: 0, Y: 0})
+	// Update pty window size
+	winsize := &pty.Winsize{
+		Rows: data.WindowSize.Height,
+		Cols: data.WindowSize.Width,
+		X:    0,
+		Y:    0,
+	}
+	pty.Setsize(ptmx, winsize)
 
-	// Copy stdin to the pty and the pty to stdout.
-	// NOTE: The goroutine will keep reading until the next keystroke before returning.
-	go func() { _, _ = io.Copy(ptmx, ws) }()
+	go func() {
+		_, _ = io.Copy(ptmx, ws)
+	}()
 	_, _ = io.Copy(ws, ptmx)
 }
 
 var runCmd = &cobra.Command{
 	Use:   "run",
-	Short: "Run websocket server",
+	Short: "Run server",
 	Run: func(cmd *cobra.Command, args []string) {
-		public, err := fs.Sub(static, "public")
+		port, err := cmd.PersistentFlags().GetString("port")
 		if err != nil {
 			log.Println(err)
 			return
 		}
-		http.Handle("/", http.FileServer(http.FS(public)))
-		http.Handle("/ws", websocket.Handler(shell))
-		if err := http.ListenAndServe(":3000", nil); err != nil {
+		html := strings.Replace(indexHTML, "{port}", port, 1)
+		http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(html))
+		})
+		http.Handle("/ws", websocket.Handler(run))
+
+		log.Println("start server with port: " + port)
+		if err := http.ListenAndServe(":"+port, nil); err != nil {
 			log.Println(err)
 		}
 	},
 }
 
 func init() {
+	runCmd.PersistentFlags().StringP("port", "p", "9999", "server port")
 	rootCmd.AddCommand(runCmd)
 }
