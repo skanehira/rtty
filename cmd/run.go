@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"sync"
+	"time"
 
 	_ "embed"
 
@@ -20,12 +22,14 @@ import (
 //go:embed public/index.html
 var indexHTML string
 
+// run command
+var command string = "bash"
+
 type InitData struct {
 	WindowSize struct {
 		Width  uint16 `json:"width"`
 		Height uint16 `json:"height"`
 	} `json:"window_size"`
-	Cmd string `json:"cmd"`
 }
 
 func OpenBrowser(url string) {
@@ -56,7 +60,7 @@ func run(ws *websocket.Conn) {
 	}
 
 	// Create arbitrary command.
-	c := exec.Command(data.Cmd)
+	c := exec.Command(command)
 
 	// Start the command with a pty.
 	ptmx, err := pty.Start(c)
@@ -92,29 +96,67 @@ func run(ws *websocket.Conn) {
 
 var runCmd = &cobra.Command{
 	Use:   "run",
-	Short: "Run server",
+	Short: "Run command",
 	Run: func(cmd *cobra.Command, args []string) {
+		if len(args) > 0 {
+			command = args[0]
+		}
 		port, err := cmd.PersistentFlags().GetString("port")
 		if err != nil {
 			log.Println(err)
 			return
 		}
+
 		html := strings.Replace(indexHTML, "{port}", port, 1)
 		http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write([]byte(html))
 		})
 		http.Handle("/ws", websocket.Handler(run))
 
-		log.Println("start server with port: " + port)
+		var wg sync.WaitGroup
+		var serverErr error
+		go func() {
+			wg.Add(1)
+			defer wg.Done()
+			log.Println("running command: " + command)
+			log.Println("running http://localhost:" + port)
 
-		OpenBrowser("http://localhost:" + port)
-		if err := http.ListenAndServe(":"+port, nil); err != nil {
-			log.Println(err)
+			if serverErr := http.ListenAndServe(":"+port, nil); serverErr != nil {
+				log.Println(serverErr)
+			}
+		}()
+
+		// wait for run server
+		time.Sleep(500 * time.Microsecond)
+
+		if serverErr == nil {
+			// open brwoser
+			openView, err := cmd.PersistentFlags().GetBool("view")
+			if err != nil {
+				log.Println(err)
+			} else if openView {
+				OpenBrowser("http://localhost:" + port)
+			}
 		}
+
+		wg.Wait()
 	},
 }
 
 func init() {
 	runCmd.PersistentFlags().StringP("port", "p", "9999", "server port")
+	runCmd.PersistentFlags().BoolP("view", "v", false, "open browser")
+	runCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
+		fmt.Print(`Run command
+
+Usage:
+  rtty run [command] [flags]
+
+Flags:
+  -h, --help          help for run
+  -p, --port string   server port (default "9999")
+  -v, --view bool     open browser (default false)
+`)
+	})
 	rootCmd.AddCommand(runCmd)
 }

@@ -22,7 +22,6 @@
             "width": terminal.cols,
             "height": terminal.rows,
           },
-          "cmd": "zsh"
         };
 
         socket.send(JSON.stringify(initData));
@@ -31,7 +30,7 @@
         });
 
         socket.onclose = () => {
-          terminal.write('\r\n[Disconnected]\r\n')
+          terminal.writeln('[Disconnected]')
         }
 
         socket.onmessage = (e) => {
