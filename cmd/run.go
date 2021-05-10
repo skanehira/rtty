@@ -60,7 +60,10 @@ func run(ws *websocket.Conn) {
 		X:    0,
 		Y:    0,
 	}
-	pty.Setsize(ptmx, winsize)
+	if err := pty.Setsize(ptmx, winsize); err != nil {
+		_, _ = ws.Write([]byte(fmt.Sprintf("failed to set pty window size: %s", err)))
+		return
+	}
 
 	go func() {
 		_, _ = io.Copy(ptmx, ws)
