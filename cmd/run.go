@@ -63,7 +63,13 @@ func run(ws *websocket.Conn) {
 	c := exec.Command(command)
 
 	// Start the command with a pty.
-	ptmx, err := pty.Start(c)
+	winsize := &pty.Winsize{
+		Rows: data.WindowSize.Height,
+		Cols: data.WindowSize.Width,
+		X:    0,
+		Y:    0,
+	}
+	ptmx, err := pty.StartWithSize(c, winsize)
 	if err != nil {
 		_, _ = ws.Write([]byte(fmt.Sprintf("failed to creating pty: %s\r\n", err)))
 		return
@@ -75,18 +81,6 @@ func run(ws *websocket.Conn) {
 		_ = c.Process.Kill()
 		_, _ = c.Process.Wait()
 	}() // Best effort.
-
-	// Update pty window size
-	winsize := &pty.Winsize{
-		Rows: data.WindowSize.Height,
-		Cols: data.WindowSize.Width,
-		X:    0,
-		Y:    0,
-	}
-	if err := pty.Setsize(ptmx, winsize); err != nil {
-		_, _ = ws.Write([]byte(fmt.Sprintf("failed to set pty window size: %s", err)))
-		return
-	}
 
 	go func() {
 		_, _ = io.Copy(ptmx, ws)
