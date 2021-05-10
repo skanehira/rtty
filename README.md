@@ -22,24 +22,21 @@ Terminal on browser via websocket
 ## Usage
 ```sh
 # Run server
-$ rtty run
-2021/05/10 13:35:23 start server with port: 9999
+$ rtty run zsh -p 8080 -v
+2021/05/10 14:08:11 running command: zsh
+2021/05/10 14:08:11 running http://localhost:8080
 
 # Help
-$ rtty
-Usage:
-  rtty [flags]
-  rtty [command]
+$ rtty run -h
+Run command
 
-Available Commands:
-  help        Help about any command
-  run         Run server
-  version     Version of rtty
+Usage:
+  rtty run [command] [flags]
 
 Flags:
-  -h, --help   help for rtty
-
-Use "rtty [command] --help" for more information about a command.
+  -h, --help          help for run
+  -p, --port string   server port (default "9999")
+  -v, --view bool     open browser (default false)
 ```
 
 ## Author
