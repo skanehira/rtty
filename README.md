@@ -8,12 +8,36 @@
 # rtty
 Terminal on browser via websocket
 
+## Supportted OS
+- Linux
+- Mac
+
 ## Installation
-```sh
-go install github.com/skanehira/rtty@latest
-```
+- Build from source(Go v1.16 ~)
+  ```sh
+  go install github.com/skanehira/rtty@latest
+  ```
+- Download from Releases
 
 ## Usage
+```sh
+# Run server
+$ rtty run zsh -p 8080 -v
+2021/05/10 14:08:11 running command: zsh
+2021/05/10 14:08:11 running http://localhost:8080
+
+# Help
+$ rtty run -h
+Run command
+
+Usage:
+  rtty run [command] [flags]
+
+Flags:
+  -h, --help          help for run
+  -p, --port string   server port (default "9999")
+  -v, --view bool     open browser (default false)
+```
 
 ## Author
 skanehira
