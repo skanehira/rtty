@@ -113,10 +113,10 @@ var runCmd = &cobra.Command{
 		})
 		http.Handle("/ws", websocket.Handler(run))
 
-		var wg sync.WaitGroup
 		var serverErr error
+		var wg sync.WaitGroup
+		wg.Add(1)
 		go func() {
-			wg.Add(1)
 			defer wg.Done()
 			log.Println("running command: " + command)
 			log.Println("running http://localhost:" + port)
