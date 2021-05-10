@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os/exec"
+	"runtime"
 	"strings"
 
 	_ "embed"
@@ -25,6 +26,24 @@ type InitData struct {
 		Height uint16 `json:"height"`
 	} `json:"window_size"`
 	Cmd string `json:"cmd"`
+}
+
+func OpenBrowser(url string) {
+	args := []string{}
+	switch runtime.GOOS {
+	case "windows":
+		r := strings.NewReplacer("&", "^&")
+		args = []string{"cmd", "start", "/", r.Replace(url)}
+	case "linux":
+		args = []string{"xdg-open", url}
+	case "darwin":
+		args = []string{"open", url}
+	}
+
+	out, err := exec.Command(args[0], args[1:]...).CombinedOutput()
+	if err != nil {
+		log.Printf("%s: %s\n", out, err)
+	}
 }
 
 func run(ws *websocket.Conn) {
@@ -87,6 +106,8 @@ var runCmd = &cobra.Command{
 		http.Handle("/ws", websocket.Handler(run))
 
 		log.Println("start server with port: " + port)
+
+		OpenBrowser("http://localhost:" + port)
 		if err := http.ListenAndServe(":"+port, nil); err != nil {
 			log.Println(err)
 		}
