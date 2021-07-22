@@ -22,7 +22,7 @@ Terminal on browser via websocket
 ## Usage
 ```sh
 # Run server
-$ rtty run zsh -p 8080 -v
+$ rtty run zsh -p 8080 -v --font "Cica Regular" --font-size 20
 2021/05/10 14:08:11 running command: zsh
 2021/05/10 14:08:11 running http://localhost:8080
 
@@ -33,10 +33,15 @@ Run command
 Usage:
   rtty run [command] [flags]
 
+Command
+  Execute specified command (default "bash")
+
 Flags:
-  -h, --help          help for run
-  -p, --port string   server port (default "9999")
-  -v, --view bool     open browser (default false)
+      --font string        font (default "")
+      --font-size string   font size (default "")
+  -h, --help               help for run
+  -p, --port string        server port (default "9999")
+  -v, --view               open browser
 ```
 
 ## Author

@@ -162,8 +162,8 @@ func init() {
 Usage:
   rtty run [command] [flags]
 
-[command]
-  Execute specified command
+Command
+  Execute specified command (default "bash")
 
 Flags:
       --font string        font (default "")
