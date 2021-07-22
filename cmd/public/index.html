@@ -7,7 +7,19 @@
   <body>
     <div id="terminal" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%;"></div>
     <script>
-      const terminal = new Terminal({ cursorBlink: true });
+      const fontFamily = "{fontFamily}";
+      const fontSize = "{fontSize}";
+      const option = { cursorBlink: true };
+
+      if (fontFamily) {
+        option["fontFamily"] = fontFamily
+      }
+
+      if (fontSize) {
+        option["fontSize"] = fontSize
+      }
+
+      const terminal = new Terminal(option);
       const fitAddon = new FitAddon.FitAddon();
       terminal.loadAddon(fitAddon);
       terminal.open(document.getElementById('terminal'))

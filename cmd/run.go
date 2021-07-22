@@ -101,7 +101,21 @@ var runCmd = &cobra.Command{
 			return
 		}
 
+		font, err := cmd.PersistentFlags().GetString("font")
+		if err != nil {
+			log.Println(err)
+			return
+		}
+		fontSize, err := cmd.PersistentFlags().GetString("font-size")
+		if err != nil {
+			log.Println(err)
+			return
+		}
+
 		html := strings.Replace(indexHTML, "{port}", port, 1)
+		html = strings.Replace(html, "{fontFamily}", font, 1)
+		html = strings.Replace(html, "{fontSize}", fontSize, 1)
+
 		http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write([]byte(html))
 		})
@@ -124,7 +138,7 @@ var runCmd = &cobra.Command{
 		time.Sleep(500 * time.Microsecond)
 
 		if serverErr == nil {
-			// open brwoser
+			// open browser
 			openView, err := cmd.PersistentFlags().GetBool("view")
 			if err != nil {
 				log.Println(err)
@@ -139,6 +153,8 @@ var runCmd = &cobra.Command{
 
 func init() {
 	runCmd.PersistentFlags().StringP("port", "p", "9999", "server port")
+	runCmd.PersistentFlags().String("font", "", "font")
+	runCmd.PersistentFlags().String("font-size", "", "font size")
 	runCmd.PersistentFlags().BoolP("view", "v", false, "open browser")
 	runCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
 		fmt.Print(`Run command
@@ -146,10 +162,15 @@ func init() {
 Usage:
   rtty run [command] [flags]
 
+[command]
+  Execute specified command
+
 Flags:
-  -h, --help          help for run
-  -p, --port string   server port (default "9999")
-  -v, --view bool     open browser (default false)
+      --font string        font (default "")
+      --font-size string   font size (default "")
+  -h, --help               help for run
+  -p, --port string        server port (default "9999")
+  -v, --view               open browser
 `)
 	})
 	rootCmd.AddCommand(runCmd)
