@@ -19,5 +19,4 @@ builds:
       - -X github.com/skanehira/rtty/cmd.Revision={{.ShortCommit}}
     goos:
       - linux
-      - windows
       - darwin
