@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -27,6 +26,9 @@ var indexHTML string
 // run command
 var command string = "bash"
 
+// wait time for server start
+var waitTime = 500
+
 type InitData struct {
 	WindowSize struct {
 		Width  uint16 `json:"width"`
@@ -46,6 +48,7 @@ func OpenBrowser(url string) {
 		args = []string{"open", url}
 	}
 
+	//nolint
 	out, err := exec.Command(args[0], args[1:]...).CombinedOutput()
 	if err != nil {
 		log.Printf("%s: %s\n", out, err)
@@ -88,70 +91,43 @@ func run(ws *websocket.Conn) {
 		_, _ = io.Copy(ptmx, ws)
 	}()
 
-	_, _ = Copy(ws, ptmx)
+	w := &wsConn{
+		conn: ws,
+	}
+
+	_, _ = io.Copy(w, ptmx)
 }
 
-func Copy(dst io.Writer, src io.Reader) (written int64, err error) {
-	var buf []byte
-	size := 32 * 1024
-	buf = make([]byte, size)
-	var stock []byte
+type wsConn struct {
+	conn *websocket.Conn
+	buf  []byte
+}
 
-	for {
-		nr, er := src.Read(buf)
-		if nr > 0 {
-			read := buf[0:nr]
-			if !utf8.Valid(read) {
-				stocklen := len(stock)
-				stock = append(stock, read...)[:stocklen+len(read)]
-				written += int64(len(read))
-				if utf8.Valid(stock) {
-					n, e := dst.Write(stock)
-					if e != nil {
-						er = e
-						break
-					}
-					written += int64(n)
-					stock = stock[:0]
-				}
-				continue
-			} else {
-				if len(stock) > 0 {
-					n, e := dst.Write(stock)
-					if e != nil {
-						er = e
-						break
-					}
-					written += int64(n)
-					stock = stock[:0]
-					println("wrote")
-				}
-			}
-			nw, ew := dst.Write(read[0:nr])
-			if nw < 0 || nr < nw {
-				nw = 0
-				if ew == nil {
-					ew = errors.New("err invalid write")
-				}
-			}
-			written += int64(nw)
-			if ew != nil {
-				err = ew
-				break
-			}
-			if nr != nw {
-				err = io.ErrShortWrite
-				break
-			}
+// Checking and buffering `b`
+// If `b` is invalid UTF-8, it would be buffered
+// if buffer is valid UTF-8, it would write to connection
+func (ws *wsConn) Write(b []byte) (i int, err error) {
+	if !utf8.Valid(b) {
+		buflen := len(ws.buf)
+		blen := len(b)
+		ws.buf = append(ws.buf, b...)[:buflen+blen]
+		if utf8.Valid(ws.buf) {
+			_, e := ws.conn.Write(ws.buf)
+			ws.buf = ws.buf[:0]
+			return blen, e
 		}
-		if er != nil {
-			if er != io.EOF {
-				err = er
-			}
-			break
+		return blen, nil
+	}
+
+	if len(ws.buf) > 0 {
+		n, err := ws.conn.Write(ws.buf)
+		ws.buf = ws.buf[:0]
+		if err != nil {
+			return n, err
 		}
 	}
-	return written, err
+	n, e := ws.conn.Write(b)
+	return n, e
 }
 
 var runCmd = &cobra.Command{
@@ -201,7 +177,7 @@ var runCmd = &cobra.Command{
 		}()
 
 		// wait for run server
-		time.Sleep(500 * time.Microsecond)
+		time.Sleep(time.Duration(waitTime) * time.Microsecond)
 
 		if serverErr == nil {
 			// open browser
