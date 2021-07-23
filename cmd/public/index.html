@@ -37,9 +37,9 @@
         };
 
         socket.send(JSON.stringify(initData));
-        terminal.onKey((e) => {
-          socket.send(e.key);
-        });
+        terminal.onData(data => {
+          socket.send(data);
+        })
 
         socket.onclose = () => {
           terminal.writeln('[Disconnected]')
