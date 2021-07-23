@@ -8,7 +8,9 @@
 # rtty
 Terminal on browser via websocket
 
-## Supportted OS
+![](https://i.gyazo.com/bc8a484cdbffbf8fd1d6a574f181cb24.png)
+
+## Supported OS
 - Linux
 - Mac
 
