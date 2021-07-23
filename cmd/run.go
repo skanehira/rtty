@@ -55,6 +55,19 @@ func OpenBrowser(url string) {
 	}
 }
 
+func filter(ss []string) []string {
+	rs := []string{}
+
+	for _, s := range ss {
+		if s == "" {
+			continue
+		}
+		rs = append(rs, s)
+	}
+
+	return rs
+}
+
 func run(ws *websocket.Conn) {
 	defer ws.Close()
 
@@ -65,7 +78,14 @@ func run(ws *websocket.Conn) {
 	}
 
 	// Create arbitrary command.
-	c := exec.Command(command)
+	cmd := filter(strings.Split(command, " "))
+
+	var c *exec.Cmd
+	if len(cmd) > 1 {
+		c = exec.Command(cmd[0], cmd[1:]...)
+	} else {
+		c = exec.Command(cmd[0])
+	}
 
 	// Start the command with a pty.
 	winsize := &pty.Winsize{
