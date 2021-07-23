@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	_ "embed"
 
@@ -24,6 +25,9 @@ var indexHTML string
 
 // run command
 var command string = "bash"
+
+// wait time for server start
+var waitTime = 500
 
 type InitData struct {
 	WindowSize struct {
@@ -44,6 +48,7 @@ func OpenBrowser(url string) {
 		args = []string{"open", url}
 	}
 
+	//nolint
 	out, err := exec.Command(args[0], args[1:]...).CombinedOutput()
 	if err != nil {
 		log.Printf("%s: %s\n", out, err)
@@ -85,7 +90,44 @@ func run(ws *websocket.Conn) {
 	go func() {
 		_, _ = io.Copy(ptmx, ws)
 	}()
-	_, _ = io.Copy(ws, ptmx)
+
+	w := &wsConn{
+		conn: ws,
+	}
+
+	_, _ = io.Copy(w, ptmx)
+}
+
+type wsConn struct {
+	conn *websocket.Conn
+	buf  []byte
+}
+
+// Checking and buffering `b`
+// If `b` is invalid UTF-8, it would be buffered
+// if buffer is valid UTF-8, it would write to connection
+func (ws *wsConn) Write(b []byte) (i int, err error) {
+	if !utf8.Valid(b) {
+		buflen := len(ws.buf)
+		blen := len(b)
+		ws.buf = append(ws.buf, b...)[:buflen+blen]
+		if utf8.Valid(ws.buf) {
+			_, e := ws.conn.Write(ws.buf)
+			ws.buf = ws.buf[:0]
+			return blen, e
+		}
+		return blen, nil
+	}
+
+	if len(ws.buf) > 0 {
+		n, err := ws.conn.Write(ws.buf)
+		ws.buf = ws.buf[:0]
+		if err != nil {
+			return n, err
+		}
+	}
+	n, e := ws.conn.Write(b)
+	return n, e
 }
 
 var runCmd = &cobra.Command{
@@ -135,7 +177,7 @@ var runCmd = &cobra.Command{
 		}()
 
 		// wait for run server
-		time.Sleep(500 * time.Microsecond)
+		time.Sleep(time.Duration(waitTime) * time.Microsecond)
 
 		if serverErr == nil {
 			// open browser
