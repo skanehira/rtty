@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	_ "embed"
 
@@ -85,7 +87,71 @@ func run(ws *websocket.Conn) {
 	go func() {
 		_, _ = io.Copy(ptmx, ws)
 	}()
-	_, _ = io.Copy(ws, ptmx)
+
+	_, _ = Copy(ws, ptmx)
+}
+
+func Copy(dst io.Writer, src io.Reader) (written int64, err error) {
+	var buf []byte
+	size := 32 * 1024
+	buf = make([]byte, size)
+	var stock []byte
+
+	for {
+		nr, er := src.Read(buf)
+		if nr > 0 {
+			read := buf[0:nr]
+			if !utf8.Valid(read) {
+				stocklen := len(stock)
+				stock = append(stock, read...)[:stocklen+len(read)]
+				written += int64(len(read))
+				if utf8.Valid(stock) {
+					n, e := dst.Write(stock)
+					if e != nil {
+						er = e
+						break
+					}
+					written += int64(n)
+					stock = stock[:0]
+				}
+				continue
+			} else {
+				if len(stock) > 0 {
+					n, e := dst.Write(stock)
+					if e != nil {
+						er = e
+						break
+					}
+					written += int64(n)
+					stock = stock[:0]
+					println("wrote")
+				}
+			}
+			nw, ew := dst.Write(read[0:nr])
+			if nw < 0 || nr < nw {
+				nw = 0
+				if ew == nil {
+					ew = errors.New("err invalid write")
+				}
+			}
+			written += int64(nw)
+			if ew != nil {
+				err = ew
+				break
+			}
+			if nr != nw {
+				err = io.ErrShortWrite
+				break
+			}
+		}
+		if er != nil {
+			if er != io.EOF {
+				err = er
+			}
+			break
+		}
+	}
+	return written, err
 }
 
 var runCmd = &cobra.Command{
