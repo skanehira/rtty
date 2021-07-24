@@ -36,7 +36,7 @@ Usage:
   rtty run [command] [flags]
 
 Command
-  Execute specified command (default "bash")
+  Execute specified command (default $SHELL)
 
 Flags:
       --font string        font (default "")
