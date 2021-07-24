@@ -91,8 +91,6 @@ func run(ws *websocket.Conn) {
 	winsize := &pty.Winsize{
 		Rows: data.WindowSize.Height,
 		Cols: data.WindowSize.Width,
-		X:    0,
-		Y:    0,
 	}
 	ptmx, err := pty.StartWithSize(c, winsize)
 	if err != nil {
