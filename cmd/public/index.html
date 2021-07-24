@@ -27,6 +27,19 @@
       fitAddon.fit();
 
       const socket = new WebSocket('ws://localhost:{port}/ws');
+
+      // workaround
+      // for redraw terminal screen when reload window
+      const redraw = (socket, msg) => {
+        msg.data.cols--
+        terminal.resize(msg.data.cols,msg.data.rows)
+        socket.send(JSON.stringify(msg));
+
+        msg.data.cols++
+        terminal.resize(msg.data.cols,msg.data.rows)
+        socket.send(JSON.stringify(msg));
+      }
+
       socket.onopen = () => {
         const msg = {
           event: "resize",
@@ -37,7 +50,15 @@
         };
         socket.send(JSON.stringify(msg));
 
+        redraw(socket, msg)
+
         terminal.onData(data => {
+          switch(socket.readyState) {
+            case WebSocket.CLOSED:
+            case WebSocket.CLOSING:
+              terminal.dispose();
+              return;
+          }
           const msg = {
             event: "sendKey",
             data: data,
@@ -52,23 +73,27 @@
         socket.onmessage = (e) => {
           terminal.write(e.data);
         }
-      }
 
-      terminal.onResize((size) => {
-        terminal.resize(size.cols, size.rows);
-        const msg = {
-          event: "resize",
-          data: {
-            cols: size.cols,
-            rows: size.rows,
-          },
+        terminal.onResize((size) => {
+          terminal.resize(size.cols, size.rows);
+          const msg = {
+            event: "resize",
+            data: {
+              cols: size.cols,
+              rows: size.rows,
+            },
+          }
+          socket.send(JSON.stringify(msg));
+        });
+
+        window.onbeforeunload = (event) => {
+          socket.close();
         }
-        socket.send(JSON.stringify(msg));
-      });
 
-      window.addEventListener("resize", () => {
-        fitAddon.fit()
-      })
+        window.addEventListener("resize", () => {
+          fitAddon.fit()
+        })
+      }
     </script>
   </body>
 </html>

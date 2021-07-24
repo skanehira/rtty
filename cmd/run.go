@@ -1,14 +1,17 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"os/exec"
+	"os/signal"
 	"strings"
-	"sync"
+	"syscall"
 	"time"
 	"unicode/utf8"
 
@@ -27,12 +30,14 @@ var command string = getenv("SHELL", "bash")
 
 // wait time for server start
 var waitTime = 500
+var checkProcInterval = 5
 
 type Event string
 
 const (
 	EventResize  Event = "resize"
 	EventSnedkey Event = "sendKey"
+	EventClose   Event = "close"
 )
 
 type Message struct {
@@ -40,64 +45,68 @@ type Message struct {
 	Data  interface{}
 }
 
+var ptmx *os.File
+var execCmd *exec.Cmd
+
 func run(ws *websocket.Conn) {
 	defer ws.Close()
 
-	var msg Message
-	if err := json.NewDecoder(ws).Decode(&msg); err != nil {
-		_, _ = ws.Write([]byte(fmt.Sprintf("failed to decode json: %s\r\n", err)))
-		return
+	wsconn := &wsConn{
+		conn: ws,
 	}
 
-	rows, cols, err := windowSize(msg.Data)
-	if err != nil {
-		_, _ = ws.Write([]byte(fmt.Sprintf("%s\r\n", err)))
-		return
+	if ptmx == nil {
+		var msg Message
+		if err := json.NewDecoder(ws).Decode(&msg); err != nil {
+			log.Println("failed to decode message:", err)
+			return
+		}
+
+		rows, cols, err := windowSize(msg.Data)
+		if err != nil {
+			_, _ = ws.Write([]byte(fmt.Sprintf("%s\r\n", err)))
+			return
+		}
+		winsize := &pty.Winsize{
+			Rows: rows,
+			Cols: cols,
+		}
+
+		c := filter(strings.Split(command, " "))
+		if len(c) > 1 {
+			//nolint
+			execCmd = exec.Command(c[0], c[1:]...)
+		} else {
+			//nolint
+			execCmd = exec.Command(c[0])
+		}
+
+		ptmx, err = pty.StartWithSize(execCmd, winsize)
+		if err != nil {
+			log.Println("failed to create pty", err)
+			return
+		}
 	}
-
-	// Create arbitrary command.
-	cmd := filter(strings.Split(command, " "))
-
-	var c *exec.Cmd
-	if len(cmd) > 1 {
-		c = exec.Command(cmd[0], cmd[1:]...)
-	} else {
-		c = exec.Command(cmd[0])
-	}
-
-	winsize := &pty.Winsize{
-		Rows: rows,
-		Cols: cols,
-	}
-
-	ptmx, err := pty.StartWithSize(c, winsize)
-	if err != nil {
-		_, _ = ws.Write([]byte(fmt.Sprintf("failed to creating pty: %s\r\n", err)))
-		return
-	}
-
-	// Make sure to close the pty at the end.
-	defer func() {
-		_ = ptmx.Close()
-		_ = c.Process.Kill()
-		_, _ = c.Process.Wait()
-	}() // Best effort.
 
 	// write data to process
 	go func() {
 		for {
 			var msg Message
 			if err := json.NewDecoder(ws).Decode(&msg); err != nil {
-				_, _ = ws.Write([]byte(fmt.Sprintf("failed to creating pty: %s\r\n", err)))
-				continue
+				return
+			}
+
+			if msg.Event == EventClose {
+				log.Println("close websocket")
+				ws.Close()
+				return
 			}
 
 			if msg.Event == EventResize {
 				rows, cols, err := windowSize(msg.Data)
 				if err != nil {
-					err := fmt.Sprintf("%s\r\n", err)
-					_, _ = ws.Write([]byte(err))
-					continue
+					log.Println(err)
+					return
 				}
 
 				winsize := &pty.Winsize{
@@ -106,32 +115,27 @@ func run(ws *websocket.Conn) {
 				}
 
 				if err := pty.Setsize(ptmx, winsize); err != nil {
-					err := fmt.Sprintf("%s\r\n", err)
-					_, _ = ws.Write([]byte(err))
+					log.Println("failed to set window size:", err)
+					return
 				}
 				continue
 			}
 
 			data, ok := msg.Data.(string)
 			if !ok {
-				err := fmt.Sprintf("invalid message data: %#+v\r\n", msg)
-				log.Println(err)
-				_, _ = ws.Write([]byte(err))
-				continue
+				log.Println("invalid message data:", data)
+				return
 			}
 
 			_, err := ptmx.WriteString(data)
 			if err != nil {
-				_, _ = ws.Write([]byte(fmt.Sprintf("failed to write data to ptmx: %s\r\n", err)))
+				log.Println("failed to write data to ptmx:", err)
+				return
 			}
 		}
 	}()
 
-	w := &wsConn{
-		conn: ws,
-	}
-
-	_, _ = io.Copy(w, ptmx)
+	_, _ = io.Copy(wsconn, ptmx)
 }
 
 type wsConn struct {
@@ -194,21 +198,43 @@ var runCmd = &cobra.Command{
 		html = strings.Replace(html, "{fontFamily}", font, 1)
 		html = strings.Replace(html, "{fontSize}", fontSize, 1)
 
-		http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		var serverErr error
+		mux := http.NewServeMux()
+		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write([]byte(html))
 		})
-		http.Handle("/ws", websocket.Handler(run))
+		mux.Handle("/ws", websocket.Handler(run))
 
-		var serverErr error
-		var wg sync.WaitGroup
-		wg.Add(1)
+		server := &http.Server{
+			Addr:    ":" + port,
+			Handler: mux,
+		}
+
 		go func() {
-			defer wg.Done()
 			log.Println("running command: " + command)
 			log.Println("running http://localhost:" + port)
 
-			if serverErr := http.ListenAndServe(":"+port, nil); serverErr != nil {
+			if serverErr := server.ListenAndServe(); serverErr != nil {
 				log.Println(serverErr)
+			}
+		}()
+
+		// check process state
+		go func() {
+			ticker := time.NewTicker(time.Duration(checkProcInterval) * time.Second)
+			for range ticker.C {
+				if execCmd != nil {
+					state, err := execCmd.Process.Wait()
+					if err != nil {
+						return
+					}
+
+					if state.ExitCode() != -1 {
+						ptmx.Close()
+						ptmx = nil
+						execCmd = nil
+					}
+				}
 			}
 		}()
 
@@ -225,7 +251,20 @@ var runCmd = &cobra.Command{
 			}
 		}
 
-		wg.Wait()
+		quit := make(chan os.Signal, 1)
+		signal.Notify(quit, syscall.SIGTERM, os.Interrupt)
+		<-quit
+
+		if ptmx != nil {
+			_ = ptmx.Close()
+		}
+		if execCmd != nil {
+			_ = execCmd.Process.Kill()
+			_, _ = execCmd.Process.Wait()
+		}
+		if err := server.Shutdown(context.Background()); err != nil {
+			log.Println("failed to shutdown server", err)
+		}
 	},
 }
 
