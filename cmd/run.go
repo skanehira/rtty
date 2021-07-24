@@ -30,6 +30,7 @@ var command string = getenv("SHELL", "bash")
 
 // wait time for server start
 var waitTime = 500
+var checkProcInterval = 5
 
 type Event string
 
@@ -73,8 +74,10 @@ func run(ws *websocket.Conn) {
 
 		c := filter(strings.Split(command, " "))
 		if len(c) > 1 {
+			//nolint
 			execCmd = exec.Command(c[0], c[1:]...)
 		} else {
+			//nolint
 			execCmd = exec.Command(c[0])
 		}
 
@@ -218,21 +221,18 @@ var runCmd = &cobra.Command{
 
 		// check process state
 		go func() {
-			ticker := time.NewTicker(5 * time.Second)
-			for {
-				select {
-				case <-ticker.C:
-					if execCmd != nil {
-						state, err := execCmd.Process.Wait()
-						if err != nil {
-							return
-						}
+			ticker := time.NewTicker(time.Duration(checkProcInterval) * time.Second)
+			for range ticker.C {
+				if execCmd != nil {
+					state, err := execCmd.Process.Wait()
+					if err != nil {
+						return
+					}
 
-						if state.ExitCode() != -1 {
-							ptmx.Close()
-							ptmx = nil
-							execCmd = nil
-						}
+					if state.ExitCode() != -1 {
+						ptmx.Close()
+						ptmx = nil
+						execCmd = nil
 					}
 				}
 			}
@@ -256,11 +256,10 @@ var runCmd = &cobra.Command{
 		<-quit
 
 		if ptmx != nil {
-			if err := ptmx.Close(); err != nil {
-			}
+			_ = ptmx.Close()
 		}
 		if execCmd != nil {
-			execCmd.Process.Kill()
+			_ = execCmd.Process.Kill()
 			_, _ = execCmd.Process.Wait()
 		}
 		if err := server.Shutdown(context.Background()); err != nil {
