@@ -12,20 +12,19 @@
       const option = { cursorBlink: true };
 
       if (fontFamily) {
-        option["fontFamily"] = fontFamily
+        option["fontFamily"] = fontFamily;
       }
 
       if (fontSize) {
-        option["fontSize"] = fontSize
+        option["fontSize"] = fontSize;
       }
 
       const terminal = new Terminal(option);
       const fitAddon = new FitAddon.FitAddon();
       terminal.loadAddon(fitAddon);
-      terminal.open(document.getElementById('terminal'))
+      terminal.open(document.getElementById('terminal'));
+      terminal.focus();
       fitAddon.fit();
-
-      const elm = document.querySelector(".terminal")
 
       const socket = new WebSocket('ws://localhost:{port}/ws');
       socket.onopen = () => {
@@ -47,7 +46,7 @@
         })
 
         socket.onclose = () => {
-          terminal.writeln('[Disconnected]')
+          terminal.writeln('[Disconnected]');
         }
 
         socket.onmessage = (e) => {
@@ -56,7 +55,7 @@
       }
 
       terminal.onResize((size) => {
-        terminal.resize(size.cols, size.rows)
+        terminal.resize(size.cols, size.rows);
         const msg = {
           event: "resize",
           data: {
