@@ -12,37 +12,41 @@
       const option = { cursorBlink: true };
 
       if (fontFamily) {
-        option["fontFamily"] = fontFamily
+        option["fontFamily"] = fontFamily;
       }
 
       if (fontSize) {
-        option["fontSize"] = fontSize
+        option["fontSize"] = fontSize;
       }
 
       const terminal = new Terminal(option);
       const fitAddon = new FitAddon.FitAddon();
       terminal.loadAddon(fitAddon);
-      terminal.open(document.getElementById('terminal'))
+      terminal.open(document.getElementById('terminal'));
+      terminal.focus();
       fitAddon.fit();
-
-      const elm = document.querySelector(".terminal")
 
       const socket = new WebSocket('ws://localhost:{port}/ws');
       socket.onopen = () => {
-        const initData = {
-          "window_size": {
-            "width": terminal.cols,
-            "height": terminal.rows,
+        const msg = {
+          event: "resize",
+          data: {
+            "cols": terminal.cols,
+            "rows": terminal.rows,
           },
         };
+        socket.send(JSON.stringify(msg));
 
-        socket.send(JSON.stringify(initData));
         terminal.onData(data => {
-          socket.send(data);
+          const msg = {
+            event: "sendKey",
+            data: data,
+          }
+          socket.send(JSON.stringify(msg));
         })
 
         socket.onclose = () => {
-          terminal.writeln('[Disconnected]')
+          terminal.writeln('[Disconnected]');
         }
 
         socket.onmessage = (e) => {
@@ -50,8 +54,21 @@
         }
       }
 
-      terminal.focus()
+      terminal.onResize((size) => {
+        terminal.resize(size.cols, size.rows);
+        const msg = {
+          event: "resize",
+          data: {
+            cols: size.cols,
+            rows: size.rows,
+          },
+        }
+        socket.send(JSON.stringify(msg));
+      });
 
+      window.addEventListener("resize", () => {
+        fitAddon.fit()
+      })
     </script>
   </body>
 </html>

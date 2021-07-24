@@ -28,19 +28,30 @@ var command string = getenv("SHELL", "bash")
 // wait time for server start
 var waitTime = 500
 
-type InitData struct {
-	WindowSize struct {
-		Width  uint16 `json:"width"`
-		Height uint16 `json:"height"`
-	} `json:"window_size"`
+type Event string
+
+const (
+	EventResize  Event = "resize"
+	EventSnedkey Event = "sendKey"
+)
+
+type Message struct {
+	Event Event
+	Data  interface{}
 }
 
 func run(ws *websocket.Conn) {
 	defer ws.Close()
 
-	var data InitData
-	if err := json.NewDecoder(ws).Decode(&data); err != nil {
+	var msg Message
+	if err := json.NewDecoder(ws).Decode(&msg); err != nil {
 		_, _ = ws.Write([]byte(fmt.Sprintf("failed to decode json: %s\r\n", err)))
+		return
+	}
+
+	rows, cols, err := windowSize(msg.Data)
+	if err != nil {
+		_, _ = ws.Write([]byte(fmt.Sprintf("%s\r\n", err)))
 		return
 	}
 
@@ -54,11 +65,11 @@ func run(ws *websocket.Conn) {
 		c = exec.Command(cmd[0])
 	}
 
-	// Start the command with a pty.
 	winsize := &pty.Winsize{
-		Rows: data.WindowSize.Height,
-		Cols: data.WindowSize.Width,
+		Rows: rows,
+		Cols: cols,
 	}
+
 	ptmx, err := pty.StartWithSize(c, winsize)
 	if err != nil {
 		_, _ = ws.Write([]byte(fmt.Sprintf("failed to creating pty: %s\r\n", err)))
@@ -72,8 +83,48 @@ func run(ws *websocket.Conn) {
 		_, _ = c.Process.Wait()
 	}() // Best effort.
 
+	// write data to process
 	go func() {
-		_, _ = io.Copy(ptmx, ws)
+		for {
+			var msg Message
+			if err := json.NewDecoder(ws).Decode(&msg); err != nil {
+				_, _ = ws.Write([]byte(fmt.Sprintf("failed to creating pty: %s\r\n", err)))
+				continue
+			}
+
+			if msg.Event == EventResize {
+				rows, cols, err := windowSize(msg.Data)
+				if err != nil {
+					err := fmt.Sprintf("%s\r\n", err)
+					_, _ = ws.Write([]byte(err))
+					continue
+				}
+
+				winsize := &pty.Winsize{
+					Rows: rows,
+					Cols: cols,
+				}
+
+				if err := pty.Setsize(ptmx, winsize); err != nil {
+					err := fmt.Sprintf("%s\r\n", err)
+					_, _ = ws.Write([]byte(err))
+				}
+				continue
+			}
+
+			data, ok := msg.Data.(string)
+			if !ok {
+				err := fmt.Sprintf("invalid message data: %#+v\r\n", msg)
+				log.Println(err)
+				_, _ = ws.Write([]byte(err))
+				continue
+			}
+
+			_, err := ptmx.WriteString(data)
+			if err != nil {
+				_, _ = ws.Write([]byte(fmt.Sprintf("failed to write data to ptmx: %s\r\n", err)))
+			}
+		}
 	}()
 
 	w := &wsConn{
