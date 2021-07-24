@@ -29,16 +29,21 @@
 
       const socket = new WebSocket('ws://localhost:{port}/ws');
       socket.onopen = () => {
-        const initData = {
-          "window_size": {
-            "width": terminal.cols,
-            "height": terminal.rows,
+        const msg = {
+          event: "resize",
+          data: {
+            "cols": terminal.cols,
+            "rows": terminal.rows,
           },
         };
+        socket.send(JSON.stringify(msg));
 
-        socket.send(JSON.stringify(initData));
         terminal.onData(data => {
-          socket.send(data);
+          const msg = {
+            event: "sendKey",
+            data: data,
+          }
+          socket.send(JSON.stringify(msg));
         })
 
         socket.onclose = () => {
@@ -49,6 +54,22 @@
           terminal.write(e.data);
         }
       }
+
+      terminal.onResize((size) => {
+        terminal.resize(size.cols, size.rows)
+        const msg = {
+          event: "resize",
+          data: {
+            cols: size.cols,
+            rows: size.rows,
+          },
+        }
+        socket.send(JSON.stringify(msg));
+      });
+
+      window.addEventListener("resize", () => {
+        fitAddon.fit()
+      })
     </script>
   </body>
 </html>

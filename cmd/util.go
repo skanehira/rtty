@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"os/exec"
@@ -46,4 +47,16 @@ func getenv(key, def string) string {
 		return v
 	}
 	return def
+}
+
+func windowSize(msg interface{}) (rows, cols uint16, err error) {
+	data, ok := msg.(map[string]interface{})
+	if !ok {
+		return 0, 0, fmt.Errorf("invalid message: %#+v", msg)
+	}
+
+	rows = uint16(data["rows"].(float64))
+	cols = uint16(data["cols"].(float64))
+
+	return
 }
