@@ -7,7 +7,6 @@ import (
 	"log"
 	"net/http"
 	"os/exec"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -24,7 +23,7 @@ import (
 var indexHTML string
 
 // run command
-var command string = "bash"
+var command string = getenv("SHELL", "bash")
 
 // wait time for server start
 var waitTime = 500
@@ -34,38 +33,6 @@ type InitData struct {
 		Width  uint16 `json:"width"`
 		Height uint16 `json:"height"`
 	} `json:"window_size"`
-}
-
-func OpenBrowser(url string) {
-	args := []string{}
-	switch runtime.GOOS {
-	case "windows":
-		r := strings.NewReplacer("&", "^&")
-		args = []string{"cmd", "start", "/", r.Replace(url)}
-	case "linux":
-		args = []string{"xdg-open", url}
-	case "darwin":
-		args = []string{"open", url}
-	}
-
-	//nolint
-	out, err := exec.Command(args[0], args[1:]...).CombinedOutput()
-	if err != nil {
-		log.Printf("%s: %s\n", out, err)
-	}
-}
-
-func filter(ss []string) []string {
-	rs := []string{}
-
-	for _, s := range ss {
-		if s == "" {
-			continue
-		}
-		rs = append(rs, s)
-	}
-
-	return rs
 }
 
 func run(ws *websocket.Conn) {
@@ -217,13 +184,13 @@ func init() {
 	runCmd.PersistentFlags().String("font-size", "", "font size")
 	runCmd.PersistentFlags().BoolP("view", "v", false, "open browser")
 	runCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
-		fmt.Print(`Run command
+		fmt.Printf(`Run command
 
 Usage:
   rtty run [command] [flags]
 
 Command
-  Execute specified command (default "bash")
+  Execute specified command (default "%s")
 
 Flags:
       --font string        font (default "")
@@ -231,7 +198,7 @@ Flags:
   -h, --help               help for run
   -p, --port string        server port (default "9999")
   -v, --view               open browser
-`)
+`, command)
 	})
 	rootCmd.AddCommand(runCmd)
 }
