@@ -25,6 +25,9 @@ import (
 //go:embed public/index.html
 var indexHTML string
 
+//go:embed public/index.js
+var indexJS string
+
 // run command
 var command string = getenv("SHELL", "bash")
 
@@ -194,14 +197,17 @@ var runCmd = &cobra.Command{
 			return
 		}
 
-		html := strings.Replace(indexHTML, "{port}", port, 1)
-		html = strings.Replace(html, "{fontFamily}", font, 1)
-		html = strings.Replace(html, "{fontSize}", fontSize, 1)
+		indexJS = strings.Replace(indexJS, "{port}", port, 1)
+		indexJS = strings.Replace(indexJS, "{fontFamily}", font, 1)
+		indexJS = strings.Replace(indexJS, "{fontSize}", fontSize, 1)
 
 		var serverErr error
 		mux := http.NewServeMux()
 		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-			_, _ = w.Write([]byte(html))
+			_, _ = w.Write([]byte(indexHTML))
+		})
+		mux.HandleFunc("/index.js", func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(indexJS))
 		})
 		mux.Handle("/ws", websocket.Handler(run))
 
