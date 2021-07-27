@@ -23,7 +23,7 @@ terminal.open(document.getElementById('terminal'));
 terminal.focus();
 fitAddon.fit();
 
-const socket = new WebSocket('ws://localhost:{port}/ws');
+const socket = new WebSocket('ws://' + location.host + '/ws');
 
 // workaround
 // for redraw terminal screen when reload window

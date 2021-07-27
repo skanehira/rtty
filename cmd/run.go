@@ -197,6 +197,7 @@ var runCmd = &cobra.Command{
 			return
 		}
 
+
 		indexJS = strings.Replace(indexJS, "{port}", port, 1)
 		indexJS = strings.Replace(indexJS, "{fontFamily}", font, 1)
 		indexJS = strings.Replace(indexJS, "{fontSize}", fontSize, 1)
@@ -211,8 +212,18 @@ var runCmd = &cobra.Command{
 		})
 		mux.Handle("/ws", websocket.Handler(run))
 
+		isLocalhostOnly, err := cmd.PersistentFlags().GetBool("local")
+		address := ""
+		if err != nil {
+			log.Println(err)
+		} else if isLocalhostOnly {
+			address = "127.0.0.1" + ":" + port
+		} else {
+			address = ":" + port
+		}
+
 		server := &http.Server{
-			Addr:    ":" + port,
+			Addr:    address,
 			Handler: mux,
 		}
 
@@ -279,6 +290,7 @@ func init() {
 	runCmd.PersistentFlags().String("font", "", "font")
 	runCmd.PersistentFlags().String("font-size", "", "font size")
 	runCmd.PersistentFlags().BoolP("view", "v", false, "open browser")
+	runCmd.PersistentFlags().BoolP("local", "l", false, "localhost only")
 	runCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
 		fmt.Printf(`Run command
 
@@ -294,6 +306,7 @@ Flags:
   -h, --help               help for run
   -p, --port string        server port (default "9999")
   -v, --view               open browser
+  -l, --local              localhost only
 `, command)
 	})
 	rootCmd.AddCommand(runCmd)

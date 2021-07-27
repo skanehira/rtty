@@ -36,7 +36,7 @@ Usage:
   rtty run [command] [flags]
 
 Command
-  Execute specified command (default $SHELL)
+  Execute specified command (default "$SHELL")
 
 Flags:
       --font string        font (default "")
@@ -44,6 +44,7 @@ Flags:
   -h, --help               help for run
   -p, --port string        server port (default "9999")
   -v, --view               open browser
+  -l, --local              localhost only
 ```
 
 ## Author
