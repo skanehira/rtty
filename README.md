@@ -39,10 +39,11 @@ Command
   Execute specified command (default $SHELL)
 
 Flags:
-      --font string        font (default "")
-      --font-size string   font size (default "")
+  -a, --addr string        server address
+      --font string        font
+      --font-size string   font size
   -h, --help               help for run
-  -p, --port string        server port (default "9999")
+  -p, --port int           server port (default 9999)
   -v, --view               open browser
 ```
 
