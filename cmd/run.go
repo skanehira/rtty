@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -180,11 +181,12 @@ var runCmd = &cobra.Command{
 		if len(args) > 0 {
 			command = args[0]
 		}
-		port, err := cmd.PersistentFlags().GetString("port")
+		portFlag, err := cmd.PersistentFlags().GetInt("port")
 		if err != nil {
 			log.Println(err)
 			return
 		}
+		port := strconv.Itoa(portFlag)
 
 		font, err := cmd.PersistentFlags().GetString("font")
 		if err != nil {
@@ -275,7 +277,7 @@ var runCmd = &cobra.Command{
 }
 
 func init() {
-	runCmd.PersistentFlags().StringP("port", "p", "9999", "server port")
+	runCmd.PersistentFlags().IntP("port", "p", 9999, "server port")
 	runCmd.PersistentFlags().String("font", "", "font")
 	runCmd.PersistentFlags().String("font-size", "", "font size")
 	runCmd.PersistentFlags().BoolP("view", "v", false, "open browser")
@@ -292,7 +294,7 @@ Flags:
       --font string        font (default "")
       --font-size string   font size (default "")
   -h, --help               help for run
-  -p, --port string        server port (default "9999")
+  -p, --port int           server port (default 9999)
   -v, --view               open browser
 `, command)
 	})
