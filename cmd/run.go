@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"text/template"
 	"time"
 	"unicode/utf8"
 
@@ -199,9 +200,19 @@ var runCmd = &cobra.Command{
 			return
 		}
 
+		addr, err := cmd.PersistentFlags().GetString("addr")
+		if err != nil {
+			log.Println(err)
+			return
+		}
+		if addr == "" {
+			addr = "localhost"
+		}
+
+		indexJS = strings.Replace(indexJS, "{addr}", template.JSEscapeString(addr), 1)
 		indexJS = strings.Replace(indexJS, "{port}", port, 1)
-		indexJS = strings.Replace(indexJS, "{fontFamily}", font, 1)
-		indexJS = strings.Replace(indexJS, "{fontSize}", fontSize, 1)
+		indexJS = strings.Replace(indexJS, "{fontFamily}", template.JSEscapeString(font), 1)
+		indexJS = strings.Replace(indexJS, "{fontSize}", template.JSEscapeString(fontSize), 1)
 
 		var serverErr error
 		mux := http.NewServeMux()
@@ -214,13 +225,13 @@ var runCmd = &cobra.Command{
 		mux.Handle("/ws", websocket.Handler(run))
 
 		server := &http.Server{
-			Addr:    ":" + port,
+			Addr:    addr + ":" + port,
 			Handler: mux,
 		}
 
 		go func() {
 			log.Println("running command: " + command)
-			log.Println("running http://localhost:" + port)
+			log.Printf("running http://%s:%s\n", addr, port)
 
 			if serverErr := server.ListenAndServe(); serverErr != nil {
 				log.Println(serverErr)
@@ -255,7 +266,7 @@ var runCmd = &cobra.Command{
 			if err != nil {
 				log.Println(err)
 			} else if openView {
-				OpenBrowser("http://localhost:" + port)
+				OpenBrowser(fmt.Sprintf("http://%s:%s", addr, port))
 			}
 		}
 
@@ -278,6 +289,7 @@ var runCmd = &cobra.Command{
 
 func init() {
 	runCmd.PersistentFlags().IntP("port", "p", 9999, "server port")
+	runCmd.PersistentFlags().StringP("addr", "a", "", "server address")
 	runCmd.PersistentFlags().String("font", "", "font")
 	runCmd.PersistentFlags().String("font-size", "", "font size")
 	runCmd.PersistentFlags().BoolP("view", "v", false, "open browser")
@@ -291,8 +303,9 @@ Command
   Execute specified command (default "%s")
 
 Flags:
-      --font string        font (default "")
-      --font-size string   font size (default "")
+  -a, --addr string        server address
+      --font string        font
+      --font-size string   font size
   -h, --help               help for run
   -p, --port int           server port (default 9999)
   -v, --view               open browser
