@@ -2,9 +2,11 @@ package cmd
 
 import (
 	"context"
+	"embed"
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -29,6 +31,9 @@ var indexHTML string
 
 //go:embed public/index.js
 var indexJS string
+
+//go:embed public
+var public embed.FS
 
 // run command
 var command string = getenv("SHELL", "bash")
@@ -219,6 +224,13 @@ var runCmd = &cobra.Command{
 		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write([]byte(indexHTML))
 		})
+		sub, err := fs.Sub(public, "public")
+		if err != nil {
+			return
+		}
+		publicHandler := http.FileServer(http.FS(sub))
+		mux.Handle("/css/", publicHandler)
+		mux.Handle("/js/", publicHandler)
 		mux.HandleFunc("/index.js", func(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write([]byte(indexJS))
 		})
