@@ -11,7 +11,7 @@ var rootCmd = &cobra.Command{
 	Use: "rtty",
 }
 
-func exitError(msg interface{}) {
+func exitError(msg any) {
 	fmt.Fprintln(os.Stderr, msg)
 	os.Exit(1)
 }

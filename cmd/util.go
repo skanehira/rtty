@@ -49,8 +49,8 @@ func getenv(key, def string) string {
 	return def
 }
 
-func windowSize(msg interface{}) (rows, cols uint16, err error) {
-	data, ok := msg.(map[string]interface{})
+func windowSize(msg any) (rows, cols uint16, err error) {
+	data, ok := msg.(map[string]any)
 	if !ok {
 		return 0, 0, fmt.Errorf("invalid message: %#+v", msg)
 	}

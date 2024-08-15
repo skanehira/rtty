@@ -52,7 +52,7 @@ const (
 
 type Message struct {
 	Event Event
-	Data  interface{}
+	Data  any
 }
 
 var ptmx *os.File
