@@ -21,11 +21,11 @@ jobs:
       - name: Install Go
         uses: actions/setup-go@v5
         with:
-          go-version: ${{ matrix.go-version }}
+          go-version: stable
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
-          version: v1.59
+          version: v1.60.1
   test:
     strategy:
       matrix:

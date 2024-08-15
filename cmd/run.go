@@ -196,9 +196,9 @@ func checkOrigin(allowOrigins []string) func(config *websocket.Config, req *http
 			}
 		}
 
-		msg := fmt.Sprintf("not allowed origin: %s", config.Origin.Host)
-		log.Printf(msg)
-		return fmt.Errorf(msg)
+		msg := "not allowed origin: %s\n"
+		log.Printf(msg, config.Origin.Host)
+		return fmt.Errorf(msg, config.Origin.Host)
 	}
 }
 
