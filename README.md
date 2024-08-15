@@ -2,8 +2,8 @@
 ![GitHub](https://img.shields.io/github/license/skanehira/rtty)
 ![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/skanehira/rtty)
 ![GitHub all releases](https://img.shields.io/github/downloads/skanehira/rtty/total)
-![GitHub CI Status](https://img.shields.io/github/workflow/status/skanehira/rtty/ci?label=CI)
-![GitHub Release Status](https://img.shields.io/github/workflow/status/skanehira/rtty/Release?label=release)
+![GitHub CI Status](https://img.shields.io/github/actions/workflow/status/skanehira/rtty/ci.yaml?branch=main&label=CI)
+![GitHub Release Status](https://img.shields.io/github/actions/workflow/status/skanehira/rtty/release.yaml?branch=main&label=Release)
 
 # rtty
 Terminal on browser via websocket
@@ -15,7 +15,7 @@ Terminal on browser via websocket
 - Mac
 
 ## Installation
-- Build from source(Go v1.16 ~)
+- Build from source(Go v1.23.0 ~)
   ```sh
   go install github.com/skanehira/rtty@latest
   ```
