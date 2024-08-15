@@ -180,6 +180,28 @@ func (ws *wsConn) Write(b []byte) (i int, err error) {
 	return n, e
 }
 
+func checkOrigin(allowOrigins []string) func(config *websocket.Config, req *http.Request) error {
+	return func(config *websocket.Config, req *http.Request) (err error) {
+		config.Origin, err = websocket.Origin(config, req)
+		if err == nil && config.Origin == nil {
+			return fmt.Errorf("null origin")
+		}
+		if err != nil {
+			return err
+		}
+
+		for _, allowOrigin := range allowOrigins {
+			if config.Origin.Host == allowOrigin {
+				return nil
+			}
+		}
+
+		msg := fmt.Sprintf("not allowed origin: %s", config.Origin.Host)
+		log.Printf(msg)
+		return fmt.Errorf(msg)
+	}
+}
+
 var runCmd = &cobra.Command{
 	Use:   "run",
 	Short: "Run command",
@@ -210,9 +232,6 @@ var runCmd = &cobra.Command{
 			log.Println(err)
 			return
 		}
-		if addr == "" {
-			addr = "localhost"
-		}
 
 		indexJS = strings.Replace(indexJS, "{addr}", template.JSEscapeString(addr), 1)
 		indexJS = strings.Replace(indexJS, "{port}", port, 1)
@@ -234,7 +253,13 @@ var runCmd = &cobra.Command{
 		mux.HandleFunc("/index.js", func(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write([]byte(indexJS))
 		})
-		mux.Handle("/ws", websocket.Handler(run))
+
+		allowedOrigins, err := cmd.PersistentFlags().GetStringArray("allow-origin")
+		allowedOrigins = append(allowedOrigins, "localhost:"+port)
+		if err != nil {
+			log.Println(err)
+		}
+		mux.Handle("/ws", websocket.Server{Handler: run, Handshake: checkOrigin(allowedOrigins)})
 
 		server := &http.Server{
 			Addr:    addr + ":" + port,
@@ -242,6 +267,7 @@ var runCmd = &cobra.Command{
 		}
 
 		go func() {
+			log.Println("allowed origins", allowedOrigins)
 			log.Println("running command: " + command)
 			log.Printf("running http://%s:%s\n", addr, port)
 
@@ -301,10 +327,11 @@ var runCmd = &cobra.Command{
 
 func init() {
 	runCmd.PersistentFlags().IntP("port", "p", 9999, "server port")
-	runCmd.PersistentFlags().StringP("addr", "a", "", "server address")
+	runCmd.PersistentFlags().StringP("addr", "a", "localhost", "server address")
 	runCmd.PersistentFlags().String("font", "", "font")
 	runCmd.PersistentFlags().String("font-size", "", "font size")
 	runCmd.PersistentFlags().BoolP("view", "v", false, "open browser")
+	runCmd.PersistentFlags().StringArray("allow-origin", []string{}, "allow origin")
 	runCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
 		fmt.Printf(`Run command
 
@@ -315,12 +342,13 @@ Command
   Execute specified command (default "%s")
 
 Flags:
-  -a, --addr string        server address
-      --font string        font
-      --font-size string   font size
-  -h, --help               help for run
-  -p, --port int           server port (default 9999)
-  -v, --view               open browser
+  -a, --addr string                server address (default "localhost")
+      --allow-origin stringArray   allow origin (default ["localhost:9999"])
+      --font string                font
+      --font-size string           font size
+  -h, --help                       help for run
+  -p, --port int                   server port (default 9999)
+  -v, --view                       open browser
 `, command)
 	})
 	rootCmd.AddCommand(runCmd)

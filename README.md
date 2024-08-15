@@ -25,8 +25,9 @@ Terminal on browser via websocket
 ```sh
 # Run server
 $ rtty run zsh -p 8080 -v --font "Cica Regular" --font-size 20
-2021/05/10 14:08:11 running command: zsh
-2021/05/10 14:08:11 running http://localhost:8080
+2024/08/15 23:39:37 allowed origins [localhost:8080]
+2024/08/15 23:39:37 running command: zsh
+2024/08/15 23:39:37 running http://localhost:8080
 
 # Help
 $ rtty run -h
@@ -36,15 +37,16 @@ Usage:
   rtty run [command] [flags]
 
 Command
-  Execute specified command (default $SHELL)
+  Execute specified command (default "/bin/zsh")
 
 Flags:
-  -a, --addr string        server address
-      --font string        font
-      --font-size string   font size
-  -h, --help               help for run
-  -p, --port int           server port (default 9999)
-  -v, --view               open browser
+  -a, --addr string                server address (default "localhost")
+      --allow-origin stringArray   allow origin (default ["localhost:9999"])
+      --font string                font
+      --font-size string           font size
+  -h, --help                       help for run
+  -p, --port int                   server port (default 9999)
+  -v, --view                       open browser
 ```
 
 ## Author
