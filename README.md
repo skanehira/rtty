@@ -3,7 +3,7 @@
 ![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/skanehira/rtty)
 ![GitHub all releases](https://img.shields.io/github/downloads/skanehira/rtty/total)
 ![GitHub CI Status](https://img.shields.io/github/actions/workflow/status/skanehira/rtty/ci.yaml?branch=main&label=CI)
-![GitHub Release Status](https://img.shields.io/github/actions/workflow/status/skanehira/rtty/release.yaml?branch=main&label=Release)
+![GitHub Release Status](https://img.shields.io/github/v/release/skanehira/rtty)
 
 # rtty
 Terminal on browser via websocket
