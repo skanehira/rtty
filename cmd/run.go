@@ -554,10 +554,17 @@ var runCmd = &cobra.Command{
 
 		quit := make(chan os.Signal, 1)
 		signal.Notify(quit, syscall.SIGTERM, os.Interrupt)
+		go func() {
+			<-quit
+			signal.Stop(quit)
+			close(quit)
+		}()
 		<-quit
 
 		sess.shutdown()
-		if err := server.Shutdown(context.Background()); err != nil {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
 			log.Println("failed to shutdown server", err)
 		}
 	},
