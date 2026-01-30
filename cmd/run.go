@@ -195,11 +195,16 @@ func (s *session) broadcast(data []byte) {
 	s.mu.Lock()
 	clients := collectClients(s.clients)
 	s.mu.Unlock()
-
+	if len(clients) == 0 {
+		return
+	}
+	payload := append([]byte(nil), data...)
 	for _, client := range clients {
-		if err := writeToClient(client, data); err != nil {
-			s.removeClient(client.conn)
-		}
+		go func(client *wsConn) {
+			if err := writeToClient(client, payload); err != nil {
+				s.removeClient(client.conn)
+			}
+		}(client)
 	}
 }
 
