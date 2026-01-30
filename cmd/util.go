@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+
+	"github.com/google/shlex"
 )
 
 func OpenBrowser(url string) {
@@ -21,24 +23,11 @@ func OpenBrowser(url string) {
 		args = []string{"open", url}
 	}
 
-	//nolint
+	//nolint:gosec // command is OS-specific helper
 	out, err := exec.Command(args[0], args[1:]...).CombinedOutput()
 	if err != nil {
 		log.Printf("%s: %s\n", out, err)
 	}
-}
-
-func filter(ss []string) []string {
-	rs := []string{}
-
-	for _, s := range ss {
-		if s == "" {
-			continue
-		}
-		rs = append(rs, s)
-	}
-
-	return rs
 }
 
 func getenv(key, def string) string {
@@ -47,6 +36,20 @@ func getenv(key, def string) string {
 		return v
 	}
 	return def
+}
+
+func parseCommand(command string) ([]string, error) {
+	if strings.TrimSpace(command) == "" {
+		return nil, fmt.Errorf("command is empty")
+	}
+	parts, err := shlex.Split(command)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse command: %w", err)
+	}
+	if len(parts) == 0 {
+		return nil, fmt.Errorf("command is empty")
+	}
+	return parts, nil
 }
 
 func windowSize(msg any) (uint16, uint16, error) {

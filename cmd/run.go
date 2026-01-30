@@ -38,13 +38,13 @@ var indexJS string
 var public embed.FS
 
 // run command
-var command string = getenv("SHELL", "bash")
+var defaultCommand = getenv("SHELL", "bash")
 
 type Event string
 
 const (
 	EventResize  Event = "resize"
-	EventSnedkey Event = "sendKey"
+	EventSendKey Event = "sendKey"
 	EventClose   Event = "close"
 )
 
@@ -52,8 +52,6 @@ type Message struct {
 	Event Event
 	Data  any
 }
-
-var sharedSession = newSession()
 
 type session struct {
 	mu            sync.Mutex
@@ -81,21 +79,19 @@ func (s *session) needsStart() bool {
 	return s.ptmx == nil
 }
 
-func (s *session) start(winsize *pty.Winsize) error {
+func (s *session) start(winsize *pty.Winsize, commandArgs []string) error {
 	s.mu.Lock()
 	if s.ptmx != nil {
 		s.mu.Unlock()
 		return nil
 	}
-
-	c := filter(strings.Split(command, " "))
-	if len(c) > 1 {
-		//nolint
-		s.cmd = exec.Command(c[0], c[1:]...)
-	} else {
-		//nolint
-		s.cmd = exec.Command(c[0])
+	if len(commandArgs) == 0 {
+		s.mu.Unlock()
+		return fmt.Errorf("command is empty")
 	}
+
+	//nolint:gosec // command is user-configured and intentionally executed
+	s.cmd = exec.Command(commandArgs[0], commandArgs[1:]...)
 
 	ptmx, err := pty.StartWithSize(s.cmd, winsize)
 	if err != nil {
@@ -311,7 +307,7 @@ func (s *session) handleMessage(msg Message) error {
 			return err
 		}
 		return s.resize(rows, cols)
-	case EventSnedkey:
+	case EventSendKey:
 		data, ok := msg.Data.(string)
 		if !ok {
 			return fmt.Errorf("invalid message data: %v", msg.Data)
@@ -340,7 +336,8 @@ func (s *session) shutdown() {
 	}
 }
 
-func run(allowOrigins []string) http.HandlerFunc {
+func run(sess *session, allowOrigins []string, commandArgs []string) http.HandlerFunc {
+	commandArgs = append([]string(nil), commandArgs...)
 	return func(w http.ResponseWriter, r *http.Request) {
 		if err := checkOrigin(allowOrigins, r); err != nil {
 			http.Error(w, err.Error(), http.StatusForbidden)
@@ -368,7 +365,7 @@ func run(allowOrigins []string) http.HandlerFunc {
 			return
 		}
 
-		if sharedSession.needsStart() {
+		if sess.needsStart() {
 			if first.Event != EventResize {
 				log.Println("first message must be resize")
 				return
@@ -379,20 +376,20 @@ func run(allowOrigins []string) http.HandlerFunc {
 				return
 			}
 			winsize := &pty.Winsize{Rows: rows, Cols: cols}
-			if err := sharedSession.start(winsize); err != nil {
+			if err := sess.start(winsize, commandArgs); err != nil {
 				log.Println(err)
 				return
 			}
 		}
 
-		sharedSession.addClient(ws, wsconn)
-		defer sharedSession.removeClient(ws)
-		if err := sharedSession.sendHistory(wsconn); err != nil {
-			sharedSession.removeClient(ws)
+		sess.addClient(ws, wsconn)
+		defer sess.removeClient(ws)
+		if err := sess.sendHistory(wsconn); err != nil {
+			sess.removeClient(ws)
 			return
 		}
 
-		if err := sharedSession.handleMessage(first); err != nil {
+		if err := sess.handleMessage(first); err != nil {
 			if err != io.EOF {
 				log.Println(err)
 			}
@@ -407,7 +404,7 @@ func run(allowOrigins []string) http.HandlerFunc {
 				}
 				return
 			}
-			if err := sharedSession.handleMessage(msg); err != nil {
+			if err := sess.handleMessage(msg); err != nil {
 				if err != io.EOF {
 					log.Println(err)
 				}
@@ -443,9 +440,28 @@ var runCmd = &cobra.Command{
 	Use:   "run",
 	Short: "Run command",
 	Run: func(cmd *cobra.Command, args []string) {
+		var commandArgs []string
+		var commandDisplay string
 		if len(args) > 0 {
-			command = args[0]
+			if len(args) == 1 {
+				parsed, err := parseCommand(args[0])
+				if err != nil {
+					log.Println(err)
+					return
+				}
+				commandArgs = parsed
+			} else {
+				commandArgs = append([]string(nil), args...)
+			}
+		} else {
+			parsed, err := parseCommand(defaultCommand)
+			if err != nil {
+				log.Println(err)
+				return
+			}
+			commandArgs = parsed
 		}
+		commandDisplay = strings.Join(commandArgs, " ")
 		portFlag, err := cmd.PersistentFlags().GetInt("port")
 		if err != nil {
 			log.Println(err)
@@ -502,7 +518,8 @@ var runCmd = &cobra.Command{
 		if err != nil {
 			log.Println(err)
 		}
-		mux.Handle("/ws", run(allowedOrigins))
+		sess := newSession()
+		mux.Handle("/ws", run(sess, allowedOrigins, commandArgs))
 
 		server := &http.Server{
 			Addr:    addr + ":" + port,
@@ -511,7 +528,7 @@ var runCmd = &cobra.Command{
 
 		go func() {
 			log.Println("allowed origins", allowedOrigins)
-			log.Println("running command: " + command)
+			log.Println("running command: " + commandDisplay)
 			log.Printf("running http://%s:%s\n", addr, port)
 
 			if serverErr := server.ListenAndServe(); serverErr != nil {
@@ -536,7 +553,7 @@ var runCmd = &cobra.Command{
 		signal.Notify(quit, syscall.SIGTERM, os.Interrupt)
 		<-quit
 
-		sharedSession.shutdown()
+		sess.shutdown()
 		if err := server.Shutdown(context.Background()); err != nil {
 			log.Println("failed to shutdown server", err)
 		}
@@ -569,7 +586,7 @@ Flags:
   -h, --help                       help for run
   -p, --port int                   server port (default 9999)
   -v, --view                       open browser
-`, command)
+`, defaultCommand)
 	})
 	rootCmd.AddCommand(runCmd)
 }

@@ -6,6 +6,7 @@ toolchain go1.24.0
 
 require (
 	github.com/creack/pty v1.1.23
+	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510
 	github.com/spf13/cobra v1.8.1
 	nhooyr.io/websocket v1.8.17
 )
