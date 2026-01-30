@@ -69,7 +69,7 @@ func newSession() *session {
 	return &session{
 		clients:       make(map[*websocket.Conn]*wsConn),
 		historyLimit:  3000,
-		historyBufCap: 256 * 1024,
+		historyBufCap: 1024 * 1024,
 	}
 }
 
@@ -210,6 +210,10 @@ func (s *session) appendHistory(data []byte) {
 	}
 
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.historyBufCap > 0 && len(s.historyBuf) > s.historyBufCap {
+		s.historyBuf = s.historyBuf[:0]
+	}
 	s.historyBuf = append(s.historyBuf, data...)
 	if s.historyBufCap > 0 && len(s.historyBuf) > s.historyBufCap {
 		s.historyBuf = s.historyBuf[len(s.historyBuf)-s.historyBufCap:]
@@ -226,7 +230,6 @@ func (s *session) appendHistory(data []byte) {
 			s.history = s.history[len(s.history)-s.historyLimit:]
 		}
 	}
-	s.mu.Unlock()
 }
 
 func (s *session) sendHistory(client *wsConn) error {
