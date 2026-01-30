@@ -23,7 +23,12 @@ terminal.open(document.getElementById('terminal'));
 terminal.focus();
 fitAddon.fit();
 
-const socket = new WebSocket('ws://{addr}:{port}/ws');
+let socket = null;
+let connected = false;
+let reconnectDelay = 250;
+const reconnectDelayMax = 5000;
+const reconnectFactor = 1.7;
+let reconnectTimer = null;
 
 // workaround
 // for redraw terminal screen when reload window
@@ -37,58 +42,89 @@ const redraw = (socket, msg) => {
   socket.send(JSON.stringify(msg));
 }
 
-socket.onopen = () => {
-  const msg = {
-    event: "resize",
-    data: {
-      "cols": terminal.cols,
-      "rows": terminal.rows,
-    },
-  };
+const sendMessage = (msg) => {
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    return;
+  }
   socket.send(JSON.stringify(msg));
+}
 
-  redraw(socket, msg)
+const scheduleReconnect = () => {
+  if (reconnectTimer) {
+    return;
+  }
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    connect();
+    reconnectDelay = Math.min(reconnectDelayMax, Math.floor(reconnectDelay * reconnectFactor));
+  }, reconnectDelay);
+}
 
-  terminal.onData(data => {
-    switch (socket.readyState) {
-      case WebSocket.CLOSED:
-      case WebSocket.CLOSING:
-        terminal.dispose();
-        return;
-    }
+const connect = () => {
+  socket = new WebSocket('ws://{addr}:{port}/ws');
+
+  socket.onopen = () => {
+    connected = true;
+    reconnectDelay = 250;
     const msg = {
-      event: "sendKey",
-      data: data,
-    }
-    socket.send(JSON.stringify(msg));
-  })
-
-  socket.onclose = () => {
-    terminal.writeln('[Disconnected]');
+      event: "resize",
+      data: {
+        "cols": terminal.cols,
+        "rows": terminal.rows,
+      },
+    };
+    sendMessage(msg);
+    redraw(socket, msg)
   }
 
   socket.onmessage = (e) => {
     terminal.write(e.data);
   }
 
-  terminal.onResize((size) => {
-    terminal.resize(size.cols, size.rows);
-    const msg = {
-      event: "resize",
-      data: {
-        cols: size.cols,
-        rows: size.rows,
-      },
+  socket.onclose = () => {
+    if (connected) {
+      terminal.writeln('[Disconnected]');
     }
-    socket.send(JSON.stringify(msg));
-  });
-
-  window.onbeforeunload = () => {
-    socket.close();
+    connected = false;
+    scheduleReconnect();
   }
 
-  window.addEventListener("resize", () => {
-    fitAddon.fit()
-  })
+  socket.onerror = () => {
+    socket.close();
+  }
 }
 
+terminal.onData(data => {
+  if (!connected) {
+    return;
+  }
+  const msg = {
+    event: "sendKey",
+    data: data,
+  }
+  sendMessage(msg);
+})
+
+terminal.onResize((size) => {
+  terminal.resize(size.cols, size.rows);
+  const msg = {
+    event: "resize",
+    data: {
+      cols: size.cols,
+      rows: size.rows,
+    },
+  }
+  sendMessage(msg);
+});
+
+window.onbeforeunload = () => {
+  if (socket) {
+    socket.close();
+  }
+}
+
+window.addEventListener("resize", () => {
+  fitAddon.fit()
+})
+
+connect();

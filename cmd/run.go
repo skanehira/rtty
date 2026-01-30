@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"embed"
 	"encoding/json"
@@ -15,6 +16,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"text/template"
 	"time"
@@ -39,7 +41,6 @@ var command string = getenv("SHELL", "bash")
 
 // wait time for server start
 var waitTime = 500
-var checkProcInterval = 5
 
 type Event string
 
@@ -54,103 +55,337 @@ type Message struct {
 	Data  any
 }
 
-var ptmx *os.File
-var execCmd *exec.Cmd
+var sharedSession = newSession()
+
+type session struct {
+	mu            sync.Mutex
+	ptmx          *os.File
+	cmd           *exec.Cmd
+	clients       map[*websocket.Conn]*wsConn
+	readerRunning bool
+	history       []string
+	historyBuf    []byte
+	historyLimit  int
+}
+
+func newSession() *session {
+	return &session{
+		clients:      make(map[*websocket.Conn]*wsConn),
+		historyLimit: 3000,
+	}
+}
+
+func (s *session) needsStart() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.ptmx == nil
+}
+
+func (s *session) start(winsize *pty.Winsize) error {
+	s.mu.Lock()
+	if s.ptmx != nil {
+		s.mu.Unlock()
+		return nil
+	}
+
+	c := filter(strings.Split(command, " "))
+	if len(c) > 1 {
+		//nolint
+		s.cmd = exec.Command(c[0], c[1:]...)
+	} else {
+		//nolint
+		s.cmd = exec.Command(c[0])
+	}
+
+	ptmx, err := pty.StartWithSize(s.cmd, winsize)
+	if err != nil {
+		s.cmd = nil
+		s.mu.Unlock()
+		return fmt.Errorf("failed to create pty: %w", err)
+	}
+
+	s.ptmx = ptmx
+	s.startReaderLocked()
+	cmd := s.cmd
+	s.mu.Unlock()
+
+	go s.waitProcess(cmd, ptmx)
+	return nil
+}
+
+func (s *session) waitProcess(cmd *exec.Cmd, ptmx *os.File) {
+	if cmd == nil {
+		return
+	}
+	if err := cmd.Wait(); err != nil {
+		log.Println("failed to wait process:", err)
+	}
+
+	s.mu.Lock()
+	if s.ptmx == ptmx {
+		_ = ptmx.Close()
+	}
+	s.mu.Unlock()
+}
+
+func (s *session) startReaderLocked() {
+	if s.readerRunning || s.ptmx == nil {
+		return
+	}
+	s.readerRunning = true
+	ptmx := s.ptmx
+	go s.readLoop(ptmx)
+}
+
+func (s *session) readLoop(ptmx *os.File) {
+	buf := make([]byte, 32*1024)
+	for {
+		n, err := ptmx.Read(buf)
+		if n > 0 {
+			s.appendHistory(buf[:n])
+			s.broadcast(buf[:n])
+		}
+		if err != nil {
+			break
+		}
+	}
+
+	s.finalize(ptmx)
+}
+
+func (s *session) finalize(ptmx *os.File) {
+	s.mu.Lock()
+	if s.ptmx != ptmx {
+		s.mu.Unlock()
+		return
+	}
+
+	clients := make([]*wsConn, 0, len(s.clients))
+	for _, client := range s.clients {
+		clients = append(clients, client)
+	}
+	s.clients = make(map[*websocket.Conn]*wsConn)
+	s.ptmx = nil
+	s.cmd = nil
+	s.readerRunning = false
+	s.history = nil
+	s.historyBuf = nil
+	s.mu.Unlock()
+
+	for _, client := range clients {
+		_ = client.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+		_, _ = client.Write([]byte("\r\n[Session ended]\r\n"))
+		_ = client.conn.Close()
+	}
+}
+
+func (s *session) addClient(conn *websocket.Conn, client *wsConn) {
+	s.mu.Lock()
+	s.clients[conn] = client
+	s.mu.Unlock()
+}
+
+func (s *session) removeClient(conn *websocket.Conn) {
+	s.mu.Lock()
+	_, ok := s.clients[conn]
+	if ok {
+		delete(s.clients, conn)
+	}
+	s.mu.Unlock()
+	_ = conn.Close()
+}
+
+func (s *session) broadcast(data []byte) {
+	s.mu.Lock()
+	clients := make([]*wsConn, 0, len(s.clients))
+	for _, client := range s.clients {
+		clients = append(clients, client)
+	}
+	s.mu.Unlock()
+
+	for _, client := range clients {
+		_ = client.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+		if _, err := client.Write(data); err != nil {
+			s.removeClient(client.conn)
+		}
+	}
+}
+
+func (s *session) appendHistory(data []byte) {
+	if s.historyLimit <= 0 {
+		return
+	}
+
+	s.mu.Lock()
+	s.historyBuf = append(s.historyBuf, data...)
+	for {
+		idx := bytes.IndexByte(s.historyBuf, '\n')
+		if idx == -1 {
+			break
+		}
+		line := string(s.historyBuf[:idx+1])
+		s.history = append(s.history, line)
+		s.historyBuf = s.historyBuf[idx+1:]
+		if len(s.history) > s.historyLimit {
+			s.history = s.history[len(s.history)-s.historyLimit:]
+		}
+	}
+	s.mu.Unlock()
+}
+
+func (s *session) sendHistory(client *wsConn) error {
+	s.mu.Lock()
+	history := append([]string(nil), s.history...)
+	buf := append([]byte(nil), s.historyBuf...)
+	s.mu.Unlock()
+
+	if len(history) == 0 && len(buf) == 0 {
+		return nil
+	}
+
+	var builder strings.Builder
+	for _, line := range history {
+		builder.WriteString(line)
+	}
+	if len(buf) > 0 {
+		builder.Write(buf)
+	}
+
+	_ = client.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	_, err := client.Write([]byte(builder.String()))
+	return err
+}
+
+func (s *session) resize(rows uint16, cols uint16) error {
+	s.mu.Lock()
+	ptmx := s.ptmx
+	s.mu.Unlock()
+	if ptmx == nil {
+		return fmt.Errorf("pty not running")
+	}
+
+	winsize := &pty.Winsize{Rows: rows, Cols: cols}
+	if err := pty.Setsize(ptmx, winsize); err != nil {
+		return fmt.Errorf("failed to set window size: %w", err)
+	}
+	return nil
+}
+
+func (s *session) writeToPTY(data string) error {
+	s.mu.Lock()
+	ptmx := s.ptmx
+	s.mu.Unlock()
+	if ptmx == nil {
+		return fmt.Errorf("pty not running")
+	}
+
+	if _, err := ptmx.WriteString(data); err != nil {
+		return fmt.Errorf("failed to write data to ptmx: %w", err)
+	}
+	return nil
+}
+
+func (s *session) handleMessage(msg Message) error {
+	switch msg.Event {
+	case EventClose:
+		log.Println("close websocket")
+		return io.EOF
+	case EventResize:
+		rows, cols, err := windowSize(msg.Data)
+		if err != nil {
+			return err
+		}
+		return s.resize(rows, cols)
+	case EventSnedkey:
+		data, ok := msg.Data.(string)
+		if !ok {
+			return fmt.Errorf("invalid message data: %v", msg.Data)
+		}
+		return s.writeToPTY(data)
+	default:
+		data, ok := msg.Data.(string)
+		if !ok {
+			return nil
+		}
+		return s.writeToPTY(data)
+	}
+}
+
+func (s *session) shutdown() {
+	s.mu.Lock()
+	ptmx := s.ptmx
+	cmd := s.cmd
+	s.mu.Unlock()
+
+	if ptmx != nil {
+		_ = ptmx.Close()
+	}
+	if cmd != nil {
+		_ = cmd.Process.Kill()
+	}
+}
 
 func run(ws *websocket.Conn) {
 	defer func() {
-		err := ws.Close()
-		log.Println("failed to close websocket:", err)
+		if err := ws.Close(); err != nil {
+			log.Println("failed to close websocket:", err)
+		}
 	}()
 
 	wsconn := &wsConn{
 		conn: ws,
 	}
 
-	if ptmx == nil {
-		var msg Message
-		if err := json.NewDecoder(ws).Decode(&msg); err != nil {
-			log.Println("failed to decode message:", err)
+	var first Message
+	if err := json.NewDecoder(ws).Decode(&first); err != nil {
+		log.Println("failed to decode message:", err)
+		return
+	}
+
+	if sharedSession.needsStart() {
+		if first.Event != EventResize {
+			log.Println("first message must be resize")
 			return
 		}
-
-		rows, cols, err := windowSize(msg.Data)
+		rows, cols, err := windowSize(first.Data)
 		if err != nil {
 			_, _ = fmt.Fprintf(ws, "%s\r\n", err)
 			return
 		}
-		winsize := &pty.Winsize{
-			Rows: rows,
-			Cols: cols,
-		}
-
-		c := filter(strings.Split(command, " "))
-		if len(c) > 1 {
-			//nolint
-			execCmd = exec.Command(c[0], c[1:]...)
-		} else {
-			//nolint
-			execCmd = exec.Command(c[0])
-		}
-
-		ptmx, err = pty.StartWithSize(execCmd, winsize)
-		if err != nil {
-			log.Println("failed to create pty", err)
+		winsize := &pty.Winsize{Rows: rows, Cols: cols}
+		if err := sharedSession.start(winsize); err != nil {
+			log.Println(err)
 			return
 		}
 	}
 
-	// write data to process
-	go func() {
-		for {
-			var msg Message
-			if err := json.NewDecoder(ws).Decode(&msg); err != nil {
-				return
-			}
+	sharedSession.addClient(ws, wsconn)
+	defer sharedSession.removeClient(ws)
+	if err := sharedSession.sendHistory(wsconn); err != nil {
+		sharedSession.removeClient(ws)
+		return
+	}
 
-			if msg.Event == EventClose {
-				log.Println("close websocket")
-				err := ws.Close()
-				if err != nil {
-					log.Println("failed to close websocket:", err)
-				}
-				return
-			}
-
-			if msg.Event == EventResize {
-				rows, cols, err := windowSize(msg.Data)
-				if err != nil {
-					log.Println(err)
-					return
-				}
-
-				winsize := &pty.Winsize{
-					Rows: rows,
-					Cols: cols,
-				}
-
-				if err := pty.Setsize(ptmx, winsize); err != nil {
-					log.Println("failed to set window size:", err)
-					return
-				}
-				continue
-			}
-
-			data, ok := msg.Data.(string)
-			if !ok {
-				log.Println("invalid message data:", data)
-				return
-			}
-
-			_, err := ptmx.WriteString(data)
-			if err != nil {
-				log.Println("failed to write data to ptmx:", err)
-				return
-			}
+	if err := sharedSession.handleMessage(first); err != nil {
+		if err != io.EOF {
+			log.Println(err)
 		}
-	}()
+		return
+	}
 
-	_, _ = io.Copy(wsconn, ptmx)
+	decoder := json.NewDecoder(ws)
+	for {
+		var msg Message
+		if err := decoder.Decode(&msg); err != nil {
+			return
+		}
+		if err := sharedSession.handleMessage(msg); err != nil {
+			if err != io.EOF {
+				log.Println(err)
+			}
+			return
+		}
+	}
 }
 
 type wsConn struct {
@@ -279,29 +514,6 @@ var runCmd = &cobra.Command{
 			}
 		}()
 
-		// check process state
-		go func() {
-			ticker := time.NewTicker(time.Duration(checkProcInterval) * time.Second)
-			defer ticker.Stop()
-			for range ticker.C {
-				if execCmd != nil {
-					state, err := execCmd.Process.Wait()
-					if err != nil {
-						return
-					}
-
-					if state.ExitCode() != -1 {
-						err := ptmx.Close()
-						if err != nil {
-							log.Println("failed to close pty:", err)
-						}
-						ptmx = nil
-						execCmd = nil
-					}
-				}
-			}
-		}()
-
 		// wait for run server
 		time.Sleep(time.Duration(waitTime) * time.Microsecond)
 
@@ -319,13 +531,7 @@ var runCmd = &cobra.Command{
 		signal.Notify(quit, syscall.SIGTERM, os.Interrupt)
 		<-quit
 
-		if ptmx != nil {
-			_ = ptmx.Close()
-		}
-		if execCmd != nil {
-			_ = execCmd.Process.Kill()
-			_, _ = execCmd.Process.Wait()
-		}
+		sharedSession.shutdown()
 		if err := server.Shutdown(context.Background()); err != nil {
 			log.Println("failed to shutdown server", err)
 		}
