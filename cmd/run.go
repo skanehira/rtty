@@ -22,10 +22,10 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
 	"github.com/creack/pty"
 	"github.com/spf13/cobra"
-	"nhooyr.io/websocket"
-	"nhooyr.io/websocket/wsjson"
 )
 
 //go:embed public/index.html
@@ -90,7 +90,7 @@ func (s *session) start(winsize *pty.Winsize, commandArgs []string) error {
 		return fmt.Errorf("command is empty")
 	}
 
-	//nolint:gosec // command is user-configured and intentionally executed
+	// #nosec G204 -- command is user-configured and intentionally executed.
 	s.cmd = exec.Command(commandArgs[0], commandArgs[1:]...)
 
 	ptmx, err := pty.StartWithSize(s.cmd, winsize)
@@ -525,8 +525,9 @@ var runCmd = &cobra.Command{
 		mux.Handle("/ws", run(sess, allowedOrigins, commandArgs))
 
 		server := &http.Server{
-			Addr:    addr + ":" + port,
-			Handler: mux,
+			Addr:              addr + ":" + port,
+			Handler:           mux,
+			ReadHeaderTimeout: 5 * time.Second,
 		}
 
 		go func() {

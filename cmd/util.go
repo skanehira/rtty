@@ -22,8 +22,11 @@ func OpenBrowser(url string) {
 	case "darwin":
 		args = []string{"open", url}
 	}
+	if len(args) == 0 {
+		return
+	}
 
-	//nolint:gosec // command is OS-specific helper
+	// #nosec G204 -- command is OS-specific helper with fixed binaries.
 	out, err := exec.Command(args[0], args[1:]...).CombinedOutput()
 	if err != nil {
 		log.Printf("%s: %s\n", out, err)
