@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"context"
 	"embed"
-	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -20,10 +20,12 @@ import (
 	"syscall"
 	"text/template"
 	"time"
+	"unicode/utf8"
 
 	"github.com/creack/pty"
 	"github.com/spf13/cobra"
-	"golang.org/x/net/websocket"
+	"nhooyr.io/websocket"
+	"nhooyr.io/websocket/wsjson"
 )
 
 //go:embed public/index.html
@@ -169,7 +171,7 @@ func (s *session) finalize(ptmx *os.File) {
 
 	for _, client := range clients {
 		_ = writeToClient(client, []byte("\r\n[Session ended]\r\n"))
-		_ = client.conn.Close()
+		_ = client.conn.Close(websocket.StatusNormalClosure, "session ended")
 	}
 }
 
@@ -186,7 +188,7 @@ func (s *session) removeClient(conn *websocket.Conn) {
 		delete(s.clients, conn)
 	}
 	s.mu.Unlock()
-	_ = conn.Close()
+	_ = conn.Close(websocket.StatusNormalClosure, "closed")
 }
 
 func (s *session) broadcast(data []byte) {
@@ -256,9 +258,12 @@ func collectClients(clients map[*websocket.Conn]*wsConn) []*wsConn {
 }
 
 func writeToClient(client *wsConn, data []byte) error {
-	_ = client.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-	_, err := client.Write(data)
-	return err
+	if !utf8.Valid(data) {
+		data = bytes.ToValidUTF8(data, []byte("?"))
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return client.conn.Write(ctx, websocket.MessageText, data)
 }
 
 func (s *session) resize(rows uint16, cols uint16) error {
@@ -330,65 +335,79 @@ func (s *session) shutdown() {
 	}
 }
 
-func run(ws *websocket.Conn) {
-	defer func() {
-		if err := ws.Close(); err != nil {
-			log.Println("failed to close websocket:", err)
-		}
-	}()
-
-	wsconn := &wsConn{
-		conn: ws,
-	}
-
-	var first Message
-	if err := json.NewDecoder(ws).Decode(&first); err != nil {
-		log.Println("failed to decode message:", err)
-		return
-	}
-
-	if sharedSession.needsStart() {
-		if first.Event != EventResize {
-			log.Println("first message must be resize")
+func run(allowOrigins []string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if err := checkOrigin(allowOrigins, r); err != nil {
+			http.Error(w, err.Error(), http.StatusForbidden)
 			return
 		}
-		rows, cols, err := windowSize(first.Data)
+		ws, err := websocket.Accept(w, r, nil)
 		if err != nil {
-			_, _ = fmt.Fprintf(ws, "%s\r\n", err)
+			log.Println("failed to accept websocket:", err)
 			return
 		}
-		winsize := &pty.Winsize{Rows: rows, Cols: cols}
-		if err := sharedSession.start(winsize); err != nil {
-			log.Println(err)
+		defer func() {
+			_ = ws.Close(websocket.StatusNormalClosure, "closed")
+		}()
+
+		wsconn := &wsConn{
+			conn: ws,
+		}
+
+		var first Message
+		if err := wsjson.Read(r.Context(), ws, &first); err != nil {
+			if websocket.CloseStatus(err) == websocket.StatusNormalClosure {
+				return
+			}
+			log.Println("failed to decode message:", err)
 			return
 		}
-	}
 
-	sharedSession.addClient(ws, wsconn)
-	defer sharedSession.removeClient(ws)
-	if err := sharedSession.sendHistory(wsconn); err != nil {
-		sharedSession.removeClient(ws)
-		return
-	}
-
-	if err := sharedSession.handleMessage(first); err != nil {
-		if err != io.EOF {
-			log.Println(err)
+		if sharedSession.needsStart() {
+			if first.Event != EventResize {
+				log.Println("first message must be resize")
+				return
+			}
+			rows, cols, err := windowSize(first.Data)
+			if err != nil {
+				_ = writeToClient(wsconn, []byte(fmt.Sprintf("%s\r\n", err)))
+				return
+			}
+			winsize := &pty.Winsize{Rows: rows, Cols: cols}
+			if err := sharedSession.start(winsize); err != nil {
+				log.Println(err)
+				return
+			}
 		}
-		return
-	}
 
-	decoder := json.NewDecoder(ws)
-	for {
-		var msg Message
-		if err := decoder.Decode(&msg); err != nil {
+		sharedSession.addClient(ws, wsconn)
+		defer sharedSession.removeClient(ws)
+		if err := sharedSession.sendHistory(wsconn); err != nil {
+			sharedSession.removeClient(ws)
 			return
 		}
-		if err := sharedSession.handleMessage(msg); err != nil {
+
+		if err := sharedSession.handleMessage(first); err != nil {
 			if err != io.EOF {
 				log.Println(err)
 			}
 			return
+		}
+
+		for {
+			var msg Message
+			if err := wsjson.Read(r.Context(), ws, &msg); err != nil {
+				if websocket.CloseStatus(err) == websocket.StatusNormalClosure {
+					return
+				}
+				return
+			}
+			if err := sharedSession.handleMessage(msg); err != nil {
+				if err != io.EOF {
+					log.Println(err)
+				}
+				return
+			}
 		}
 	}
 }
@@ -397,28 +416,22 @@ type wsConn struct {
 	conn *websocket.Conn
 }
 
-func (ws *wsConn) Write(b []byte) (i int, err error) {
-	return ws.conn.Write(b)
-}
-
-func checkOrigin(allowOrigins []string) func(config *websocket.Config, req *http.Request) error {
-	return func(config *websocket.Config, req *http.Request) (err error) {
-		config.Origin, err = websocket.Origin(config, req)
-		if err == nil && config.Origin == nil {
-			return fmt.Errorf("null origin")
-		}
-		if err != nil {
-			return err
-		}
-
-		if slices.Contains(allowOrigins, config.Origin.Host) {
-			return nil
-		}
-
-		msg := "not allowed origin: %s"
-		log.Printf(msg, config.Origin.Host)
-		return fmt.Errorf(msg, config.Origin.Host)
+func checkOrigin(allowOrigins []string, req *http.Request) error {
+	origin := req.Header.Get("Origin")
+	if origin == "" {
+		return fmt.Errorf("null origin")
 	}
+	originURL, err := url.Parse(origin)
+	if err != nil || originURL.Host == "" {
+		return fmt.Errorf("invalid origin: %s", origin)
+	}
+	if slices.Contains(allowOrigins, originURL.Host) {
+		return nil
+	}
+
+	msg := "not allowed origin: %s"
+	log.Printf(msg, originURL.Host)
+	return fmt.Errorf(msg, originURL.Host)
 }
 
 var runCmd = &cobra.Command{
@@ -484,7 +497,7 @@ var runCmd = &cobra.Command{
 		if err != nil {
 			log.Println(err)
 		}
-		mux.Handle("/ws", websocket.Server{Handler: run, Handshake: checkOrigin(allowedOrigins)})
+		mux.Handle("/ws", run(allowedOrigins))
 
 		server := &http.Server{
 			Addr:    addr + ":" + port,
