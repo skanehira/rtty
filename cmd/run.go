@@ -156,10 +156,7 @@ func (s *session) finalize(ptmx *os.File) {
 		return
 	}
 
-	clients := make([]*wsConn, 0, len(s.clients))
-	for _, client := range s.clients {
-		clients = append(clients, client)
-	}
+	clients := collectClients(s.clients)
 	s.clients = make(map[*websocket.Conn]*wsConn)
 	s.ptmx = nil
 	s.cmd = nil
@@ -169,8 +166,7 @@ func (s *session) finalize(ptmx *os.File) {
 	s.mu.Unlock()
 
 	for _, client := range clients {
-		_ = client.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-		_, _ = client.Write([]byte("\r\n[Session ended]\r\n"))
+		_ = writeToClient(client, []byte("\r\n[Session ended]\r\n"))
 		_ = client.conn.Close()
 	}
 }
@@ -193,15 +189,11 @@ func (s *session) removeClient(conn *websocket.Conn) {
 
 func (s *session) broadcast(data []byte) {
 	s.mu.Lock()
-	clients := make([]*wsConn, 0, len(s.clients))
-	for _, client := range s.clients {
-		clients = append(clients, client)
-	}
+	clients := collectClients(s.clients)
 	s.mu.Unlock()
 
 	for _, client := range clients {
-		_ = client.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-		if _, err := client.Write(data); err != nil {
+		if err := writeToClient(client, data); err != nil {
 			s.removeClient(client.conn)
 		}
 	}
@@ -247,8 +239,20 @@ func (s *session) sendHistory(client *wsConn) error {
 		builder.Write(buf)
 	}
 
+	return writeToClient(client, []byte(builder.String()))
+}
+
+func collectClients(clients map[*websocket.Conn]*wsConn) []*wsConn {
+	items := make([]*wsConn, 0, len(clients))
+	for _, client := range clients {
+		items = append(items, client)
+	}
+	return items
+}
+
+func writeToClient(client *wsConn, data []byte) error {
 	_ = client.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-	_, err := client.Write([]byte(builder.String()))
+	_, err := client.Write(data)
 	return err
 }
 
