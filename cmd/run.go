@@ -62,12 +62,14 @@ type session struct {
 	history       []string
 	historyBuf    []byte
 	historyLimit  int
+	historyBufCap int
 }
 
 func newSession() *session {
 	return &session{
-		clients:      make(map[*websocket.Conn]*wsConn),
-		historyLimit: 3000,
+		clients:       make(map[*websocket.Conn]*wsConn),
+		historyLimit:  3000,
+		historyBufCap: 256 * 1024,
 	}
 }
 
@@ -206,6 +208,9 @@ func (s *session) appendHistory(data []byte) {
 
 	s.mu.Lock()
 	s.historyBuf = append(s.historyBuf, data...)
+	if s.historyBufCap > 0 && len(s.historyBuf) > s.historyBufCap {
+		s.historyBuf = s.historyBuf[len(s.historyBuf)-s.historyBufCap:]
+	}
 	for {
 		idx := bytes.IndexByte(s.historyBuf, '\n')
 		if idx == -1 {
