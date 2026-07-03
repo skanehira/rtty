@@ -1,13 +1,11 @@
 module github.com/skanehira/rtty
 
-go 1.23.0
-
-toolchain go1.24.0
+go 1.25.0
 
 require (
 	github.com/creack/pty v1.1.23
 	github.com/spf13/cobra v1.8.1
-	golang.org/x/net v0.38.0
+	golang.org/x/net v0.55.0
 )
 
 require (
